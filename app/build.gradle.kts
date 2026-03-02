@@ -4,11 +4,11 @@
 }
 
 android {
-    namespace = "com.example.multitimer"
+    namespace = "com.cl.mt"
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "com.example.multitimer"
+        applicationId = "com.cl.mt"
         minSdk = 24
         targetSdk = 34
         versionCode = 1

@@ -1,4 +1,4 @@
-﻿package com.example.multitimer
+﻿package com.cl.mt
 
 import android.media.AudioAttributes
 import android.media.AudioFormat
@@ -14,13 +14,13 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.layout.weight
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -42,9 +42,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
@@ -58,13 +60,14 @@ import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlin.math.ceil
 import kotlin.math.max
 import kotlin.math.sin
 
@@ -118,96 +121,16 @@ enum class TimerStyle(
     val strokeDp: Float,
     val cap: StrokeCap
 ) {
-    Slate(
-        "Slate",
-        Color(0xFF1A2633),
-        Color(0xFF2B3B4D),
-        Color(0xFF74B3FF),
-        Color(0xFFEFF6FF),
-        14f,
-        StrokeCap.Round
-    ),
-    Ocean(
-        "Ocean",
-        Color(0xFF10293A),
-        Color(0xFF21445F),
-        Color(0xFF55C7FF),
-        Color(0xFFE5F7FF),
-        14f,
-        StrokeCap.Round
-    ),
-    Forest(
-        "Forest",
-        Color(0xFF172A22),
-        Color(0xFF2C4A3D),
-        Color(0xFF8FD6A8),
-        Color(0xFFEFFFF3),
-        14f,
-        StrokeCap.Round
-    ),
-    Sand(
-        "Sand",
-        Color(0xFF302A22),
-        Color(0xFF4A4034),
-        Color(0xFFF2C57A),
-        Color(0xFFFFF6E8),
-        13f,
-        StrokeCap.Round
-    ),
-    Ember(
-        "Ember",
-        Color(0xFF321F1F),
-        Color(0xFF4D2F2F),
-        Color(0xFFFF9D7A),
-        Color(0xFFFFEFEA),
-        14f,
-        StrokeCap.Round
-    ),
-    Copper(
-        "Copper",
-        Color(0xFF2E2320),
-        Color(0xFF463631),
-        Color(0xFFDEA685),
-        Color(0xFFFFF1E9),
-        13f,
-        StrokeCap.Butt
-    ),
-    Ice(
-        "Ice",
-        Color(0xFF1A2D34),
-        Color(0xFF314A55),
-        Color(0xFF9BE7FF),
-        Color(0xFFF0FDFF),
-        12f,
-        StrokeCap.Round
-    ),
-    Mint(
-        "Mint",
-        Color(0xFF152D29),
-        Color(0xFF2A4A43),
-        Color(0xFF89E2C7),
-        Color(0xFFEFFFF9),
-        12f,
-        StrokeCap.Round
-    ),
-    Mono(
-        "Mono",
-        Color(0xFF222222),
-        Color(0xFF3B3B3B),
-        Color(0xFFDADADA),
-        Color(0xFFFFFFFF),
-        15f,
-        StrokeCap.Square
-    ),
-    NightBlue(
-        "Night Blue",
-        Color(0xFF121D32),
-        Color(0xFF243552),
-        Color(0xFF7AA2FF),
-        Color(0xFFEAF0FF),
-        14f,
-        StrokeCap.Round
-    )
+    Slate("Slate", Color(0xFF1A2633), Color(0xFF2B3B4D), Color(0xFF74B3FF), Color(0xFFEFF6FF), 14f, StrokeCap.Round),
+    Ocean("Ocean", Color(0xFF10293A), Color(0xFF21445F), Color(0xFF55C7FF), Color(0xFFE5F7FF), 14f, StrokeCap.Round),
+    Forest("Forest", Color(0xFF172A22), Color(0xFF2C4A3D), Color(0xFF8FD6A8), Color(0xFFEFFFF3), 14f, StrokeCap.Round),
+    Sand("Sand", Color(0xFF302A22), Color(0xFF4A4034), Color(0xFFF2C57A), Color(0xFFFFF6E8), 13f, StrokeCap.Round),
+    Ember("Ember", Color(0xFF321F1F), Color(0xFF4D2F2F), Color(0xFFFF9D7A), Color(0xFFFFEFEA), 14f, StrokeCap.Round),
+    Copper("Copper", Color(0xFF2E2320), Color(0xFF463631), Color(0xFFDEA685), Color(0xFFFFF1E9), 13f, StrokeCap.Butt),
+    Ice("Ice", Color(0xFF1A2D34), Color(0xFF314A55), Color(0xFF9BE7FF), Color(0xFFF0FDFF), 12f, StrokeCap.Round),
+    Mint("Mint", Color(0xFF152D29), Color(0xFF2A4A43), Color(0xFF89E2C7), Color(0xFFEFFFF9), 12f, StrokeCap.Round),
+    Mono("Mono", Color(0xFF222222), Color(0xFF3B3B3B), Color(0xFFDADADA), Color(0xFFFFFFFF), 15f, StrokeCap.Square),
+    NightBlue("Night Blue", Color(0xFF121D32), Color(0xFF243552), Color(0xFF7AA2FF), Color(0xFFEAF0FF), 14f, StrokeCap.Round)
 }
 
 data class CountdownItem(
@@ -221,10 +144,8 @@ data class CountdownItem(
 
 class CountdownViewModel : ViewModel() {
     val timers = mutableStateListOf<CountdownItem>()
-
     private val jobs = mutableStateMapOf<Long, Job>()
     private val toneMutex = Mutex()
-
     private var idSeed = 1L
 
     init {
@@ -240,12 +161,7 @@ class CountdownViewModel : ViewModel() {
         addTimerWithDuration(1, 0, tone, style)
     }
 
-    private fun addTimerWithDuration(
-        minutes: Int,
-        seconds: Int,
-        tone: ToneOption,
-        style: TimerStyle
-    ) {
+    private fun addTimerWithDuration(minutes: Int, seconds: Int, tone: ToneOption, style: TimerStyle) {
         val total = (minutes * 60L + seconds) * 1000L
         val id = idSeed++
         timers.add(
@@ -271,30 +187,17 @@ class CountdownViewModel : ViewModel() {
         val minutes = max(0, minutesText.toIntOrNull() ?: 0)
         val seconds = (secondsText.toIntOrNull() ?: 0).coerceIn(0, 59)
         val total = (minutes * 60L + seconds) * 1000L
-
         jobs[timerId]?.cancel()
 
         if (total <= 0L) {
             updateTimer(timerId) {
-                it.copy(
-                    totalMillis = 0L,
-                    remainingMillis = 0L,
-                    isRunning = false,
-                    tone = tone,
-                    style = style
-                )
+                it.copy(totalMillis = 0L, remainingMillis = 0L, isRunning = false, tone = tone, style = style)
             }
             return
         }
 
         updateTimer(timerId) {
-            it.copy(
-                totalMillis = total,
-                remainingMillis = total,
-                isRunning = true,
-                tone = tone,
-                style = style
-            )
+            it.copy(totalMillis = total, remainingMillis = total, isRunning = true, tone = tone, style = style)
         }
         startLoop(timerId)
     }
@@ -313,7 +216,6 @@ class CountdownViewModel : ViewModel() {
     fun restartNow(timerId: Long) {
         val timer = timers.firstOrNull { it.id == timerId } ?: return
         if (timer.totalMillis <= 0L) return
-
         updateTimer(timerId) { it.copy(remainingMillis = it.totalMillis, isRunning = true) }
         startLoop(timerId)
     }
@@ -336,9 +238,7 @@ class CountdownViewModel : ViewModel() {
                 }
 
                 playTone(current.tone)
-                updateTimer(timerId) {
-                    it.copy(remainingMillis = it.totalMillis, isRunning = it.totalMillis > 0L)
-                }
+                updateTimer(timerId) { it.copy(remainingMillis = it.totalMillis, isRunning = it.totalMillis > 0L) }
             }
         }
     }
@@ -374,13 +274,11 @@ class CountdownViewModel : ViewModel() {
                 val envelope = when {
                     i < attackSamples -> i / attackSamples.toDouble()
                     i < sustainStart + sustainLength -> 1.0 - ((i - sustainStart) / sustainLength.toDouble()) * 0.35
-                    i > sampleCount - releaseSamples ->
-                        (sampleCount - i).coerceAtLeast(0) / releaseSamples.toDouble()
+                    i > sampleCount - releaseSamples -> (sampleCount - i).coerceAtLeast(0) / releaseSamples.toDouble()
                     else -> 1.0
                 }
                 val mildLowPass = 1.0 - (i / sampleCount.toDouble()) * 0.15
-                samples[i] =
-                    (wave * envelope * mildLowPass * velocity * Short.MAX_VALUE * 0.42).toInt().toShort()
+                samples[i] = (wave * envelope * mildLowPass * velocity * Short.MAX_VALUE * 0.42).toInt().toShort()
             }
 
             val track = AudioTrack.Builder()
@@ -414,9 +312,7 @@ class CountdownViewModel : ViewModel() {
 
     private fun updateTimer(timerId: Long, transform: (CountdownItem) -> CountdownItem) {
         val index = timers.indexOfFirst { it.id == timerId }
-        if (index != -1) {
-            timers[index] = transform(timers[index])
-        }
+        if (index != -1) timers[index] = transform(timers[index])
     }
 
     override fun onCleared() {
@@ -434,33 +330,67 @@ fun CountdownScreen(vm: CountdownViewModel = viewModel()) {
             .fillMaxSize()
             .background(Color(0xFF08111C))
     ) {
-        val isLandscape = maxWidth > maxHeight
-        val columns = when {
-            isLandscape -> 3
-            maxWidth < 480.dp -> 1
-            else -> 2
-        }
-        val preferredRing = if (isLandscape) 220.dp else 260.dp
-        val maxRing = (maxWidth / columns) - 24.dp
-        val baseRing = if (preferredRing < maxRing) preferredRing else maxRing
-        val ringSize = if (baseRing < 120.dp) 120.dp else baseRing
+        val count = vm.timers.size.coerceAtLeast(1)
+        val screenPadding = 12.dp
+        val gridGap = 10.dp
+        val fabReserve = 86.dp
 
-        LazyVerticalGrid(
-            columns = GridCells.Fixed(columns),
+        val usableWidth = maxWidth - (screenPadding * 2)
+        val usableHeightBase = maxHeight - (screenPadding * 2) - fabReserve
+        val usableHeight = if (usableHeightBase < 100.dp) 100.dp else usableHeightBase
+
+        var bestColumns = 1
+        var bestRingSize = 0.dp
+        for (cols in 1..count) {
+            val rows = ceil(count / cols.toDouble()).toInt()
+            val cellWidth = (usableWidth - gridGap * (cols - 1)) / cols
+            val cellHeight = (usableHeight - gridGap * (rows - 1)) / rows
+            val candidate = if (cellWidth < cellHeight) cellWidth else cellHeight
+            if (candidate > bestRingSize) {
+                bestRingSize = candidate
+                bestColumns = cols
+            }
+        }
+
+        val rows = vm.timers.chunked(bestColumns)
+        val ringSize = (bestRingSize - 18.dp).coerceAtLeast(38.dp)
+
+        Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(horizontal = 12.dp, vertical = 14.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
-            horizontalArrangement = Arrangement.spacedBy(14.dp)
+                .padding(screenPadding),
+            verticalArrangement = Arrangement.spacedBy(gridGap)
         ) {
-            items(vm.timers, key = { it.id }) { timer ->
-                CountdownOnlyCard(
-                    timer = timer,
-                    ringSize = ringSize,
-                    onTap = { vm.togglePauseResume(timer.id) },
-                    onDoubleTap = { vm.restartNow(timer.id) },
-                    onLongPress = { configTimerId = timer.id }
-                )
+            rows.forEach { rowTimers ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
+                    horizontalArrangement = Arrangement.spacedBy(gridGap)
+                ) {
+                    rowTimers.forEach { timer ->
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxSize()
+                        ) {
+                            CountdownOnlyCard(
+                                timer = timer,
+                                ringSize = ringSize,
+                                onTap = { vm.togglePauseResume(timer.id) },
+                                onDoubleTap = { vm.restartNow(timer.id) },
+                                onLongPress = { configTimerId = timer.id }
+                            )
+                        }
+                    }
+                    repeat(bestColumns - rowTimers.size) {
+                        Spacer(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxSize()
+                        )
+                    }
+                }
             }
         }
 
@@ -498,14 +428,15 @@ private fun CountdownOnlyCard(
     onLongPress: () -> Unit
 ) {
     Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = timer.style.panelColor)
+        modifier = Modifier.fillMaxSize(),
+        colors = CardDefaults.cardColors(containerColor = timer.style.panelColor),
+        shape = RoundedCornerShape(16.dp)
     ) {
         Box(
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 12.dp),
-            contentAlignment = Alignment.Center
+                .fillMaxSize()
+                .padding(top = 6.dp),
+            contentAlignment = Alignment.TopCenter
         ) {
             ProgressRing(
                 timer = timer,
@@ -526,15 +457,14 @@ private fun ProgressRing(
     onDoubleTap: () -> Unit,
     onLongPress: () -> Unit
 ) {
-    val progress = if (timer.totalMillis == 0L) 0f
-    else timer.remainingMillis.toFloat() / timer.totalMillis.toFloat()
+    val progress = if (timer.totalMillis == 0L) 0f else timer.remainingMillis.toFloat() / timer.totalMillis.toFloat()
     val style = timer.style
+    val timeFont = (ringSize.value * 0.20f).coerceIn(10f, 34f).sp
 
     Box(
         modifier = Modifier
             .size(ringSize)
-            .padding(6.dp)
-            .clip(RoundedCornerShape(20.dp))
+            .padding(4.dp)
             .pointerInput(timer.id) {
                 detectTapGestures(
                     onTap = { onTap() },
@@ -545,29 +475,39 @@ private fun ProgressRing(
         contentAlignment = Alignment.Center
     ) {
         Canvas(modifier = Modifier.fillMaxSize()) {
-            drawArc(
-                color = style.trackColor,
-                startAngle = -90f,
-                sweepAngle = 360f,
-                useCenter = false,
-                style = Stroke(width = style.strokeDp.dp.toPx(), cap = style.cap)
-            )
-            drawArc(
-                color = style.progressColor,
-                startAngle = -90f,
-                sweepAngle = 360f * progress,
-                useCenter = false,
-                style = Stroke(width = style.strokeDp.dp.toPx(), cap = style.cap)
-            )
+            drawSafeArc(style.trackColor, 360f, style.strokeDp, style.cap)
+            drawSafeArc(style.progressColor, 360f * progress, style.strokeDp, style.cap)
         }
         Text(
             text = formatMillis(timer.remainingMillis),
             color = style.textColor,
-            fontSize = 28.sp,
+            fontSize = timeFont,
             fontWeight = FontWeight.Bold,
             textAlign = TextAlign.Center
         )
     }
+}
+
+private fun DrawScope.drawSafeArc(
+    color: Color,
+    sweepAngle: Float,
+    strokeDp: Float,
+    cap: StrokeCap
+) {
+    val strokePx = strokeDp.dp.toPx()
+    val inset = (strokePx / 2f) + 1.dp.toPx()
+    val drawSize = Size(size.width - inset * 2f, size.height - inset * 2f)
+    if (drawSize.width <= 0f || drawSize.height <= 0f) return
+
+    drawArc(
+        color = color,
+        startAngle = -90f,
+        sweepAngle = sweepAngle,
+        useCenter = false,
+        topLeft = Offset(inset, inset),
+        size = drawSize,
+        style = Stroke(width = strokePx, cap = cap)
+    )
 }
 
 @Composable
@@ -608,10 +548,7 @@ private fun TimerConfigDialog(
                     Button(onClick = { toneMenuExpanded = true }) {
                         Text("Tone: ${selectedTone.label}")
                     }
-                    DropdownMenu(
-                        expanded = toneMenuExpanded,
-                        onDismissRequest = { toneMenuExpanded = false }
-                    ) {
+                    DropdownMenu(expanded = toneMenuExpanded, onDismissRequest = { toneMenuExpanded = false }) {
                         ToneOption.entries.forEach { tone ->
                             DropdownMenuItem(
                                 text = { Text(tone.label) },
@@ -627,10 +564,7 @@ private fun TimerConfigDialog(
                     Button(onClick = { styleMenuExpanded = true }) {
                         Text("Style: ${selectedStyle.label}")
                     }
-                    DropdownMenu(
-                        expanded = styleMenuExpanded,
-                        onDismissRequest = { styleMenuExpanded = false }
-                    ) {
+                    DropdownMenu(expanded = styleMenuExpanded, onDismissRequest = { styleMenuExpanded = false }) {
                         TimerStyle.entries.forEach { style ->
                             DropdownMenuItem(
                                 text = { Text(style.label) },
