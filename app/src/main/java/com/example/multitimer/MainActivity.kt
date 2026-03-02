@@ -12,13 +12,15 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -26,6 +28,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -46,6 +49,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
@@ -227,6 +231,13 @@ class CountdownViewModel : ViewModel() {
         addTimerWithDuration(1, 0, ToneOption.PianoC3, TimerStyle.Slate)
         addTimerWithDuration(2, 0, ToneOption.PianoE3, TimerStyle.Ocean)
         addTimerWithDuration(3, 0, ToneOption.PianoG3, TimerStyle.Forest)
+    }
+
+    fun addTimer() {
+        val next = idSeed.toInt()
+        val tone = ToneOption.entries[(next - 1) % ToneOption.entries.size]
+        val style = TimerStyle.entries[(next - 1) % TimerStyle.entries.size]
+        addTimerWithDuration(1, 0, tone, style)
     }
 
     private fun addTimerWithDuration(
@@ -418,26 +429,50 @@ class CountdownViewModel : ViewModel() {
 fun CountdownScreen(vm: CountdownViewModel = viewModel()) {
     var configTimerId by remember { mutableStateOf<Long?>(null) }
 
-    Box(
+    BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
             .background(Color(0xFF08111C))
     ) {
-        LazyColumn(
+        val isLandscape = maxWidth > maxHeight
+        val columns = when {
+            isLandscape -> 3
+            maxWidth < 480.dp -> 1
+            else -> 2
+        }
+        val preferredRing = if (isLandscape) 220.dp else 260.dp
+        val maxRing = (maxWidth / columns) - 24.dp
+        val baseRing = if (preferredRing < maxRing) preferredRing else maxRing
+        val ringSize = if (baseRing < 120.dp) 120.dp else baseRing
+
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(columns),
             modifier = Modifier
                 .fillMaxSize()
-                .padding(vertical = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
+                .padding(horizontal = 12.dp, vertical = 14.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+            horizontalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             items(vm.timers, key = { it.id }) { timer ->
                 CountdownOnlyCard(
                     timer = timer,
+                    ringSize = ringSize,
                     onTap = { vm.togglePauseResume(timer.id) },
                     onDoubleTap = { vm.restartNow(timer.id) },
                     onLongPress = { configTimerId = timer.id }
                 )
             }
+        }
+
+        FloatingActionButton(
+            onClick = { vm.addTimer() },
+            containerColor = Color(0xFF1B3A57),
+            contentColor = Color.White,
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(20.dp)
+        ) {
+            Text("+", fontSize = 28.sp, fontWeight = FontWeight.SemiBold)
         }
 
         val selected = vm.timers.firstOrNull { it.id == configTimerId }
@@ -457,22 +492,24 @@ fun CountdownScreen(vm: CountdownViewModel = viewModel()) {
 @Composable
 private fun CountdownOnlyCard(
     timer: CountdownItem,
+    ringSize: Dp,
     onTap: () -> Unit,
     onDoubleTap: () -> Unit,
     onLongPress: () -> Unit
 ) {
     Card(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp),
+        modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = timer.style.panelColor)
     ) {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(vertical = 16.dp),
+                .padding(vertical = 12.dp),
             contentAlignment = Alignment.Center
         ) {
             ProgressRing(
                 timer = timer,
+                ringSize = ringSize,
                 onTap = onTap,
                 onDoubleTap = onDoubleTap,
                 onLongPress = onLongPress
@@ -484,6 +521,7 @@ private fun CountdownOnlyCard(
 @Composable
 private fun ProgressRing(
     timer: CountdownItem,
+    ringSize: Dp,
     onTap: () -> Unit,
     onDoubleTap: () -> Unit,
     onLongPress: () -> Unit
@@ -494,7 +532,8 @@ private fun ProgressRing(
 
     Box(
         modifier = Modifier
-            .size(160.dp)
+            .size(ringSize)
+            .padding(6.dp)
             .clip(RoundedCornerShape(20.dp))
             .pointerInput(timer.id) {
                 detectTapGestures(
