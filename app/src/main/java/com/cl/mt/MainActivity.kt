@@ -1,5 +1,7 @@
 ﻿package com.cl.mt
 
+import android.app.Application
+import android.content.Context
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioTrack
@@ -8,6 +10,7 @@ import android.os.SystemClock
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.viewModels
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -42,6 +45,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
@@ -57,9 +61,8 @@ import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
-import androidx.lifecycle.ViewModel
+import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -67,11 +70,15 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
+import org.json.JSONObject
 import kotlin.math.ceil
 import kotlin.math.max
 import kotlin.math.sin
 
 class MainActivity : ComponentActivity() {
+    private val vm: CountdownViewModel by viewModels()
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -86,10 +93,15 @@ class MainActivity : ComponentActivity() {
         setContent {
             MaterialTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
-                    CountdownScreen()
+                    CountdownScreen(vm = vm)
                 }
             }
         }
+    }
+
+    override fun onStop() {
+        vm.persistNow()
+        super.onStop()
     }
 }
 
@@ -153,7 +165,6 @@ private fun TimerStyle.resolve(isRunning: Boolean): TimerRenderStyle {
             cap = cap
         )
     }
-    // Paused state is global and fixed (not selectable).
     return TimerRenderStyle(
         panelColor = Color(0xFF171A20),
         trackColor = Color(0xFF2E3440),
@@ -173,16 +184,19 @@ data class CountdownItem(
     val style: TimerStyle
 )
 
-class CountdownViewModel : ViewModel() {
+class CountdownViewModel(application: Application) : AndroidViewModel(application) {
     val timers = mutableStateListOf<CountdownItem>()
+
     private val jobs = mutableStateMapOf<Long, Job>()
     private val toneMutex = Mutex()
+    private val prefs = application.getSharedPreferences("countdown_state", Context.MODE_PRIVATE)
+    private val stateKey = "timers_state_v1"
+
     private var idSeed = 1L
+    private var lastPersistMs = 0L
 
     init {
-        addTimerWithDuration(1, 0, ToneOption.PianoC3, TimerStyle.Slate)
-        addTimerWithDuration(2, 0, ToneOption.PianoE3, TimerStyle.Ocean)
-        addTimerWithDuration(3, 0, ToneOption.PianoG3, TimerStyle.Forest)
+        restoreStateOrDefault()
     }
 
     fun addTimer() {
@@ -190,6 +204,7 @@ class CountdownViewModel : ViewModel() {
         val tone = ToneOption.entries[(next - 1) % ToneOption.entries.size]
         val style = TimerStyle.entries[(next - 1) % TimerStyle.entries.size]
         addTimerWithDuration(1, 0, tone, style)
+        persistNow()
     }
 
     fun removeTimer(timerId: Long) {
@@ -197,6 +212,7 @@ class CountdownViewModel : ViewModel() {
         jobs[timerId]?.cancel()
         jobs.remove(timerId)
         timers.removeAll { it.id == timerId }
+        persistNow()
     }
 
     private fun addTimerWithDuration(minutes: Int, seconds: Int, tone: ToneOption, style: TimerStyle) {
@@ -231,6 +247,7 @@ class CountdownViewModel : ViewModel() {
             updateTimer(timerId) {
                 it.copy(totalMillis = 0L, remainingMillis = 0L, isRunning = false, tone = tone, style = style)
             }
+            persistNow()
             return
         }
 
@@ -238,6 +255,7 @@ class CountdownViewModel : ViewModel() {
             it.copy(totalMillis = total, remainingMillis = total, isRunning = true, tone = tone, style = style)
         }
         startLoop(timerId)
+        persistNow()
     }
 
     fun togglePauseResume(timerId: Long) {
@@ -245,9 +263,13 @@ class CountdownViewModel : ViewModel() {
         if (timer.isRunning) {
             jobs[timerId]?.cancel()
             updateTimer(timerId) { it.copy(isRunning = false) }
+            playActionFeedback()
+            persistNow()
         } else if (timer.totalMillis > 0L) {
             updateTimer(timerId) { it.copy(isRunning = true) }
             startLoop(timerId)
+            playActionFeedback()
+            persistNow()
         }
     }
 
@@ -256,6 +278,8 @@ class CountdownViewModel : ViewModel() {
         if (timer.totalMillis <= 0L) return
         updateTimer(timerId) { it.copy(remainingMillis = it.totalMillis, isRunning = true) }
         startLoop(timerId)
+        playActionFeedback()
+        persistNow()
     }
 
     private fun startLoop(timerId: Long) {
@@ -273,14 +297,17 @@ class CountdownViewModel : ViewModel() {
                 val now = SystemClock.elapsedRealtime()
                 val delta = (now - lastTick).coerceAtLeast(1L)
                 lastTick = now
+
                 val nextRemain = (current.remainingMillis - delta).coerceAtLeast(0L)
                 if (nextRemain > 0L) {
                     updateTimer(timerId) { it.copy(remainingMillis = nextRemain) }
+                    maybePersist()
                     continue
                 }
 
                 playTone(current.tone)
                 updateTimer(timerId) { it.copy(remainingMillis = it.totalMillis, isRunning = it.totalMillis > 0L) }
+                persistNow()
             }
         }
     }
@@ -292,6 +319,15 @@ class CountdownViewModel : ViewModel() {
                     playSyntheticTone(tone.frequencyHz, tone.burstMs, tone.velocity)
                     delay(90L)
                 }
+            }
+        }
+    }
+
+    // Unified non-configurable feedback sound for pause/resume/manual restart.
+    private fun playActionFeedback() {
+        viewModelScope.launch {
+            toneMutex.withLock {
+                playSyntheticTone(frequencyHz = 392, durationMs = 85, velocity = 0.35)
             }
         }
     }
@@ -352,19 +388,111 @@ class CountdownViewModel : ViewModel() {
         }
     }
 
+    private fun restoreStateOrDefault() {
+        val raw = prefs.getString(stateKey, null)
+        if (raw.isNullOrBlank()) {
+            addTimerWithDuration(1, 0, ToneOption.PianoC3, TimerStyle.Slate)
+            addTimerWithDuration(2, 0, ToneOption.PianoE3, TimerStyle.Ocean)
+            addTimerWithDuration(3, 0, ToneOption.PianoG3, TimerStyle.Forest)
+            persistNow()
+            return
+        }
+
+        runCatching {
+            val root = JSONObject(raw)
+            val savedAt = root.optLong("savedAtEpochMs", System.currentTimeMillis())
+            val elapsed = (System.currentTimeMillis() - savedAt).coerceAtLeast(0L)
+            val arr = root.optJSONArray("timers") ?: JSONArray()
+            val restored = mutableListOf<CountdownItem>()
+            var maxId = 0L
+
+            for (i in 0 until arr.length()) {
+                val obj = arr.getJSONObject(i)
+                val id = obj.optLong("id", i + 1L)
+                val total = obj.optLong("totalMillis", 0L).coerceAtLeast(0L)
+                val remainSaved = obj.optLong("remainingMillis", total).coerceAtLeast(0L)
+                val wasRunning = obj.optBoolean("isRunning", false)
+                val tone = ToneOption.entries.getOrElse(obj.optInt("tone", 0)) { ToneOption.PianoC3 }
+                val style = TimerStyle.entries.getOrElse(obj.optInt("style", 0)) { TimerStyle.Slate }
+
+                val remain = if (!wasRunning || total <= 0L) {
+                    remainSaved.coerceIn(0L, total)
+                } else {
+                    val rawRemain = remainSaved - elapsed
+                    if (rawRemain > 0L) rawRemain else {
+                        val mod = (-rawRemain) % total
+                        if (mod == 0L) total else total - mod
+                    }
+                }
+
+                restored += CountdownItem(
+                    id = id,
+                    totalMillis = total,
+                    remainingMillis = remain.coerceIn(0L, total),
+                    isRunning = wasRunning && total > 0L,
+                    tone = tone,
+                    style = style
+                )
+                if (id > maxId) maxId = id
+            }
+
+            if (restored.isEmpty()) error("empty")
+            timers.clear()
+            timers.addAll(restored)
+            idSeed = max(root.optLong("idSeed", maxId + 1), maxId + 1)
+            timers.filter { it.isRunning && it.totalMillis > 0L }.forEach { startLoop(it.id) }
+        }.getOrElse {
+            timers.clear()
+            addTimerWithDuration(1, 0, ToneOption.PianoC3, TimerStyle.Slate)
+            addTimerWithDuration(2, 0, ToneOption.PianoE3, TimerStyle.Ocean)
+            addTimerWithDuration(3, 0, ToneOption.PianoG3, TimerStyle.Forest)
+            persistNow()
+        }
+    }
+
+    private fun maybePersist() {
+        val now = System.currentTimeMillis()
+        if (now - lastPersistMs >= 1000L) {
+            persistNow()
+        }
+    }
+
+    fun persistNow() {
+        val now = System.currentTimeMillis()
+        val arr = JSONArray()
+        timers.forEach { t ->
+            arr.put(
+                JSONObject()
+                    .put("id", t.id)
+                    .put("totalMillis", t.totalMillis)
+                    .put("remainingMillis", t.remainingMillis)
+                    .put("isRunning", t.isRunning)
+                    .put("tone", t.tone.ordinal)
+                    .put("style", t.style.ordinal)
+            )
+        }
+        val root = JSONObject()
+            .put("idSeed", idSeed)
+            .put("savedAtEpochMs", now)
+            .put("timers", arr)
+        prefs.edit().putString(stateKey, root.toString()).apply()
+        lastPersistMs = now
+    }
+
     private fun updateTimer(timerId: Long, transform: (CountdownItem) -> CountdownItem) {
         val index = timers.indexOfFirst { it.id == timerId }
         if (index != -1) timers[index] = transform(timers[index])
     }
 
     override fun onCleared() {
+        persistNow()
         jobs.values.forEach { it.cancel() }
         super.onCleared()
     }
 }
 
 @Composable
-fun CountdownScreen(vm: CountdownViewModel = viewModel()) {
+fun CountdownScreen(vm: CountdownViewModel) {
     var configTimerId by remember { mutableStateOf<Long?>(null) }
 
     BoxWithConstraints(
@@ -438,13 +566,15 @@ fun CountdownScreen(vm: CountdownViewModel = viewModel()) {
 
         FloatingActionButton(
             onClick = { vm.addTimer() },
-            containerColor = Color(0xFF1B3A57),
-            contentColor = Color.White,
+            containerColor = Color(0xFF1B3A57).copy(alpha = 0.45f),
+            contentColor = Color(0xFFEAF2FF).copy(alpha = 0.82f),
             modifier = Modifier
                 .align(Alignment.BottomEnd)
+                .alpha(0.72f)
                 .padding(20.dp)
+                .size(48.dp)
         ) {
-            Text("+", fontSize = 28.sp, fontWeight = FontWeight.SemiBold)
+            Text("+", fontSize = 22.sp, fontWeight = FontWeight.Medium)
         }
 
         val selected = vm.timers.firstOrNull { it.id == configTimerId }
@@ -481,8 +611,7 @@ private fun CountdownOnlyCard(
         shape = RoundedCornerShape(16.dp)
     ) {
         Box(
-            modifier = Modifier
-                .fillMaxSize(),
+            modifier = Modifier.fillMaxSize(),
             contentAlignment = Alignment.Center
         ) {
             ProgressRing(
