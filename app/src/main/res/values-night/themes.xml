@@ -1,9 +1,8 @@
-﻿<resources xmlns:tools="http://schemas.android.com/tools">
-    <style name="Theme.MultiTimer" parent="@android:style/Theme.Material.Light.NoActionBar">
+﻿<resources>
+    <style name="Theme.MultiTimer" parent="@android:style/Theme.Material.NoActionBar">
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/black</item>
         <item name="android:windowLayoutInDisplayCutoutMode">shortEdges</item>
         <item name="android:windowFullscreen">true</item>
-        <item name="android:windowLightStatusBar" tools:targetApi="m">false</item>
     </style>
 </resources>

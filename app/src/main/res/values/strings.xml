@@ -1,20 +1,3 @@
-<resources>
-    <string name="app_name">RNDIS Toggle</string>
-    <string name="toggle_rndis">Toggle RNDIS</string>
-    <string name="rndis_enabled">RNDIS Enabled</string>
-    <string name="rndis_disabled">RNDIS Disabled</string>
-    <string name="create_shortcut">Create Shortcut</string>
-    <string name="shortcut_name">RNDIS Toggle</string>
-    <string name="add_quick_settings_tile">Add Quick Settings Tile</string>
-    <string name="adb_required">ADB connection required</string>
-    <string name="adb_not_connected">ADB not connected. Please enable WiFi ADB.</string>
-    <string name="test_connection">Test Connection</string>
-    <string name="adb_host">ADB Host</string>
-    <string name="adb_port">ADB Port</string>
-    <string name="save_settings">Save Settings</string>
-    <string name="settings_saved">Settings saved</string>
-    <string name="connection_successful">Connection successful</string>
-    <string name="connection_failed">Connection failed</string>
-    <string name="error">Error</string>
-    <string name="success">Success</string>
+﻿<resources>
+    <string name="app_name">Multi Countdown</string>
 </resources>
