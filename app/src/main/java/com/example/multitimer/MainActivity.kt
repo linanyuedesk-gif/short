@@ -105,12 +105,114 @@ enum class ToneOption(
     DeepPluck("Deep Pluck", 139, 380, 0.58, 2)
 }
 
+enum class TimerStyle(
+    val label: String,
+    val panelColor: Color,
+    val trackColor: Color,
+    val progressColor: Color,
+    val textColor: Color,
+    val strokeDp: Float,
+    val cap: StrokeCap
+) {
+    Slate(
+        "Slate",
+        Color(0xFF1A2633),
+        Color(0xFF2B3B4D),
+        Color(0xFF74B3FF),
+        Color(0xFFEFF6FF),
+        14f,
+        StrokeCap.Round
+    ),
+    Ocean(
+        "Ocean",
+        Color(0xFF10293A),
+        Color(0xFF21445F),
+        Color(0xFF55C7FF),
+        Color(0xFFE5F7FF),
+        14f,
+        StrokeCap.Round
+    ),
+    Forest(
+        "Forest",
+        Color(0xFF172A22),
+        Color(0xFF2C4A3D),
+        Color(0xFF8FD6A8),
+        Color(0xFFEFFFF3),
+        14f,
+        StrokeCap.Round
+    ),
+    Sand(
+        "Sand",
+        Color(0xFF302A22),
+        Color(0xFF4A4034),
+        Color(0xFFF2C57A),
+        Color(0xFFFFF6E8),
+        13f,
+        StrokeCap.Round
+    ),
+    Ember(
+        "Ember",
+        Color(0xFF321F1F),
+        Color(0xFF4D2F2F),
+        Color(0xFFFF9D7A),
+        Color(0xFFFFEFEA),
+        14f,
+        StrokeCap.Round
+    ),
+    Copper(
+        "Copper",
+        Color(0xFF2E2320),
+        Color(0xFF463631),
+        Color(0xFFDEA685),
+        Color(0xFFFFF1E9),
+        13f,
+        StrokeCap.Butt
+    ),
+    Ice(
+        "Ice",
+        Color(0xFF1A2D34),
+        Color(0xFF314A55),
+        Color(0xFF9BE7FF),
+        Color(0xFFF0FDFF),
+        12f,
+        StrokeCap.Round
+    ),
+    Mint(
+        "Mint",
+        Color(0xFF152D29),
+        Color(0xFF2A4A43),
+        Color(0xFF89E2C7),
+        Color(0xFFEFFFF9),
+        12f,
+        StrokeCap.Round
+    ),
+    Mono(
+        "Mono",
+        Color(0xFF222222),
+        Color(0xFF3B3B3B),
+        Color(0xFFDADADA),
+        Color(0xFFFFFFFF),
+        15f,
+        StrokeCap.Square
+    ),
+    NightBlue(
+        "Night Blue",
+        Color(0xFF121D32),
+        Color(0xFF243552),
+        Color(0xFF7AA2FF),
+        Color(0xFFEAF0FF),
+        14f,
+        StrokeCap.Round
+    )
+}
+
 data class CountdownItem(
     val id: Long,
     val totalMillis: Long,
     val remainingMillis: Long,
     val isRunning: Boolean,
-    val tone: ToneOption
+    val tone: ToneOption,
+    val style: TimerStyle
 )
 
 class CountdownViewModel : ViewModel() {
@@ -122,12 +224,17 @@ class CountdownViewModel : ViewModel() {
     private var idSeed = 1L
 
     init {
-        addTimerWithDuration(1, 0, ToneOption.PianoC3)
-        addTimerWithDuration(2, 0, ToneOption.PianoE3)
-        addTimerWithDuration(3, 0, ToneOption.PianoG3)
+        addTimerWithDuration(1, 0, ToneOption.PianoC3, TimerStyle.Slate)
+        addTimerWithDuration(2, 0, ToneOption.PianoE3, TimerStyle.Ocean)
+        addTimerWithDuration(3, 0, ToneOption.PianoG3, TimerStyle.Forest)
     }
 
-    private fun addTimerWithDuration(minutes: Int, seconds: Int, tone: ToneOption) {
+    private fun addTimerWithDuration(
+        minutes: Int,
+        seconds: Int,
+        tone: ToneOption,
+        style: TimerStyle
+    ) {
         val total = (minutes * 60L + seconds) * 1000L
         val id = idSeed++
         timers.add(
@@ -136,13 +243,20 @@ class CountdownViewModel : ViewModel() {
                 totalMillis = total,
                 remainingMillis = total,
                 isRunning = true,
-                tone = tone
+                tone = tone,
+                style = style
             )
         )
         startLoop(id)
     }
 
-    fun configureTimer(timerId: Long, minutesText: String, secondsText: String, tone: ToneOption) {
+    fun configureTimer(
+        timerId: Long,
+        minutesText: String,
+        secondsText: String,
+        tone: ToneOption,
+        style: TimerStyle
+    ) {
         val minutes = max(0, minutesText.toIntOrNull() ?: 0)
         val seconds = (secondsText.toIntOrNull() ?: 0).coerceIn(0, 59)
         val total = (minutes * 60L + seconds) * 1000L
@@ -151,13 +265,25 @@ class CountdownViewModel : ViewModel() {
 
         if (total <= 0L) {
             updateTimer(timerId) {
-                it.copy(totalMillis = 0L, remainingMillis = 0L, isRunning = false, tone = tone)
+                it.copy(
+                    totalMillis = 0L,
+                    remainingMillis = 0L,
+                    isRunning = false,
+                    tone = tone,
+                    style = style
+                )
             }
             return
         }
 
         updateTimer(timerId) {
-            it.copy(totalMillis = total, remainingMillis = total, isRunning = true, tone = tone)
+            it.copy(
+                totalMillis = total,
+                remainingMillis = total,
+                isRunning = true,
+                tone = tone,
+                style = style
+            )
         }
         startLoop(timerId)
     }
@@ -319,8 +445,8 @@ fun CountdownScreen(vm: CountdownViewModel = viewModel()) {
             TimerConfigDialog(
                 timer = selected,
                 onDismiss = { configTimerId = null },
-                onConfirm = { min, sec, tone ->
-                    vm.configureTimer(selected.id, min, sec, tone)
+                onConfirm = { min, sec, tone, style ->
+                    vm.configureTimer(selected.id, min, sec, tone, style)
                     configTimerId = null
                 }
             )
@@ -337,7 +463,7 @@ private fun CountdownOnlyCard(
 ) {
     Card(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF122338))
+        colors = CardDefaults.cardColors(containerColor = timer.style.panelColor)
     ) {
         Box(
             modifier = Modifier
@@ -364,6 +490,7 @@ private fun ProgressRing(
 ) {
     val progress = if (timer.totalMillis == 0L) 0f
     else timer.remainingMillis.toFloat() / timer.totalMillis.toFloat()
+    val style = timer.style
 
     Box(
         modifier = Modifier
@@ -380,23 +507,23 @@ private fun ProgressRing(
     ) {
         Canvas(modifier = Modifier.fillMaxSize()) {
             drawArc(
-                color = Color(0xFF2A3A4F),
+                color = style.trackColor,
                 startAngle = -90f,
                 sweepAngle = 360f,
                 useCenter = false,
-                style = Stroke(width = 14.dp.toPx(), cap = StrokeCap.Round)
+                style = Stroke(width = style.strokeDp.dp.toPx(), cap = style.cap)
             )
             drawArc(
-                color = Color(0xFF4FC3F7),
+                color = style.progressColor,
                 startAngle = -90f,
                 sweepAngle = 360f * progress,
                 useCenter = false,
-                style = Stroke(width = 14.dp.toPx(), cap = StrokeCap.Round)
+                style = Stroke(width = style.strokeDp.dp.toPx(), cap = style.cap)
             )
         }
         Text(
             text = formatMillis(timer.remainingMillis),
-            color = Color.White,
+            color = style.textColor,
             fontSize = 28.sp,
             fontWeight = FontWeight.Bold,
             textAlign = TextAlign.Center
@@ -408,7 +535,7 @@ private fun ProgressRing(
 private fun TimerConfigDialog(
     timer: CountdownItem,
     onDismiss: () -> Unit,
-    onConfirm: (String, String, ToneOption) -> Unit
+    onConfirm: (String, String, ToneOption, TimerStyle) -> Unit
 ) {
     var minuteInput by remember(timer.id, timer.totalMillis) {
         mutableStateOf((timer.totalMillis / 1000 / 60).toString())
@@ -417,7 +544,9 @@ private fun TimerConfigDialog(
         mutableStateOf(((timer.totalMillis / 1000) % 60).toString())
     }
     var selectedTone by remember(timer.id, timer.tone) { mutableStateOf(timer.tone) }
+    var selectedStyle by remember(timer.id, timer.style) { mutableStateOf(timer.style) }
     var toneMenuExpanded by remember(timer.id) { mutableStateOf(false) }
+    var styleMenuExpanded by remember(timer.id) { mutableStateOf(false) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -455,10 +584,29 @@ private fun TimerConfigDialog(
                         }
                     }
                 }
+                Box {
+                    Button(onClick = { styleMenuExpanded = true }) {
+                        Text("Style: ${selectedStyle.label}")
+                    }
+                    DropdownMenu(
+                        expanded = styleMenuExpanded,
+                        onDismissRequest = { styleMenuExpanded = false }
+                    ) {
+                        TimerStyle.entries.forEach { style ->
+                            DropdownMenuItem(
+                                text = { Text(style.label) },
+                                onClick = {
+                                    selectedStyle = style
+                                    styleMenuExpanded = false
+                                }
+                            )
+                        }
+                    }
+                }
             }
         },
         confirmButton = {
-            Button(onClick = { onConfirm(minuteInput, secondInput, selectedTone) }) {
+            Button(onClick = { onConfirm(minuteInput, secondInput, selectedTone, selectedStyle) }) {
                 Text("Apply")
             }
         },
