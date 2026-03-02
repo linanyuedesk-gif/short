@@ -133,6 +133,37 @@ enum class TimerStyle(
     NightBlue("Night Blue", Color(0xFF121D32), Color(0xFF243552), Color(0xFF7AA2FF), Color(0xFFEAF0FF), 14f, StrokeCap.Round)
 }
 
+data class TimerRenderStyle(
+    val panelColor: Color,
+    val trackColor: Color,
+    val progressColor: Color,
+    val textColor: Color,
+    val strokeDp: Float,
+    val cap: StrokeCap
+)
+
+private fun TimerStyle.resolve(isRunning: Boolean): TimerRenderStyle {
+    if (isRunning) {
+        return TimerRenderStyle(
+            panelColor = panelColor,
+            trackColor = trackColor,
+            progressColor = progressColor,
+            textColor = textColor,
+            strokeDp = strokeDp,
+            cap = cap
+        )
+    }
+    // Paused state is global and fixed (not selectable).
+    return TimerRenderStyle(
+        panelColor = Color(0xFF171A20),
+        trackColor = Color(0xFF2E3440),
+        progressColor = Color(0xFF7C8596),
+        textColor = Color(0xFFD7DCE6),
+        strokeDp = 13f,
+        cap = StrokeCap.Round
+    )
+}
+
 data class CountdownItem(
     val id: Long,
     val totalMillis: Long,
@@ -427,9 +458,10 @@ private fun CountdownOnlyCard(
     onDoubleTap: () -> Unit,
     onLongPress: () -> Unit
 ) {
+    val render = timer.style.resolve(timer.isRunning)
     Card(
         modifier = Modifier.fillMaxSize(),
-        colors = CardDefaults.cardColors(containerColor = timer.style.panelColor),
+        colors = CardDefaults.cardColors(containerColor = render.panelColor),
         shape = RoundedCornerShape(16.dp)
     ) {
         Box(
@@ -458,7 +490,7 @@ private fun ProgressRing(
     onLongPress: () -> Unit
 ) {
     val progress = if (timer.totalMillis == 0L) 0f else timer.remainingMillis.toFloat() / timer.totalMillis.toFloat()
-    val style = timer.style
+    val style = timer.style.resolve(timer.isRunning)
     val timeFont = (ringSize.value * 0.20f).coerceIn(10f, 34f).sp
 
     Box(
@@ -567,7 +599,16 @@ private fun TimerConfigDialog(
                     DropdownMenu(expanded = styleMenuExpanded, onDismissRequest = { styleMenuExpanded = false }) {
                         TimerStyle.entries.forEach { style ->
                             DropdownMenuItem(
-                                text = { Text(style.label) },
+                                text = {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        StylePreviewDot(style = style, isRunning = true)
+                                        StylePreviewDot(style = style, isRunning = false)
+                                        Text(style.label)
+                                    }
+                                },
                                 onClick = {
                                     selectedStyle = style
                                     styleMenuExpanded = false
@@ -589,6 +630,15 @@ private fun TimerConfigDialog(
             }
         }
     )
+}
+
+@Composable
+private fun StylePreviewDot(style: TimerStyle, isRunning: Boolean) {
+    val render = style.resolve(isRunning)
+    Canvas(modifier = Modifier.size(22.dp)) {
+        drawSafeArc(render.trackColor, 360f, render.strokeDp.coerceAtMost(4f), render.cap)
+        drawSafeArc(render.progressColor, 290f, render.strokeDp.coerceAtMost(4f), render.cap)
+    }
 }
 
 private fun formatMillis(millis: Long): String {
