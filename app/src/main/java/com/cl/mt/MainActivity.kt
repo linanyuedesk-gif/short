@@ -4,6 +4,7 @@ import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioTrack
 import android.os.Bundle
+import android.os.SystemClock
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -191,6 +192,13 @@ class CountdownViewModel : ViewModel() {
         addTimerWithDuration(1, 0, tone, style)
     }
 
+    fun removeTimer(timerId: Long) {
+        if (timers.size <= 1) return
+        jobs[timerId]?.cancel()
+        jobs.remove(timerId)
+        timers.removeAll { it.id == timerId }
+    }
+
     private fun addTimerWithDuration(minutes: Int, seconds: Int, tone: ToneOption, style: TimerStyle) {
         val total = (minutes * 60L + seconds) * 1000L
         val id = idSeed++
@@ -256,12 +264,16 @@ class CountdownViewModel : ViewModel() {
 
         jobs[timerId]?.cancel()
         jobs[timerId] = viewModelScope.launch {
+            var lastTick = SystemClock.elapsedRealtime()
             while (true) {
-                delay(100L)
+                delay(16L)
                 val current = timers.firstOrNull { it.id == timerId } ?: break
                 if (!current.isRunning) break
 
-                val nextRemain = (current.remainingMillis - 100L).coerceAtLeast(0L)
+                val now = SystemClock.elapsedRealtime()
+                val delta = (now - lastTick).coerceAtLeast(1L)
+                lastTick = now
+                val nextRemain = (current.remainingMillis - delta).coerceAtLeast(0L)
                 if (nextRemain > 0L) {
                     updateTimer(timerId) { it.copy(remainingMillis = nextRemain) }
                     continue
@@ -439,9 +451,14 @@ fun CountdownScreen(vm: CountdownViewModel = viewModel()) {
         if (selected != null) {
             TimerConfigDialog(
                 timer = selected,
+                canDelete = vm.timers.size > 1,
                 onDismiss = { configTimerId = null },
                 onConfirm = { min, sec, tone, style ->
                     vm.configureTimer(selected.id, min, sec, tone, style)
+                    configTimerId = null
+                },
+                onDelete = {
+                    vm.removeTimer(selected.id)
                     configTimerId = null
                 }
             )
@@ -465,9 +482,8 @@ private fun CountdownOnlyCard(
     ) {
         Box(
             modifier = Modifier
-                .fillMaxSize()
-                .padding(top = 6.dp),
-            contentAlignment = Alignment.TopCenter
+                .fillMaxSize(),
+            contentAlignment = Alignment.Center
         ) {
             ProgressRing(
                 timer = timer,
@@ -544,8 +560,10 @@ private fun DrawScope.drawSafeArc(
 @Composable
 private fun TimerConfigDialog(
     timer: CountdownItem,
+    canDelete: Boolean,
     onDismiss: () -> Unit,
-    onConfirm: (String, String, ToneOption, TimerStyle) -> Unit
+    onConfirm: (String, String, ToneOption, TimerStyle) -> Unit,
+    onDelete: () -> Unit
 ) {
     var minuteInput by remember(timer.id, timer.totalMillis) {
         mutableStateOf((timer.totalMillis / 1000 / 60).toString())
@@ -624,8 +642,15 @@ private fun TimerConfigDialog(
             }
         },
         dismissButton = {
-            Button(onClick = onDismiss) {
-                Text("Cancel")
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (canDelete) {
+                    Button(onClick = onDelete) {
+                        Text("Delete")
+                    }
+                }
+                Button(onClick = onDismiss) {
+                    Text("Cancel")
+                }
             }
         }
     )
