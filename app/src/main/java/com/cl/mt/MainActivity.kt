@@ -1161,13 +1161,13 @@ private fun TimerConfigDialog(
             ) {
                 Card(
                     shape = RoundedCornerShape(12.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFF102235))
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF152A41))
                 ) {
                     Column(
                         modifier = Modifier.padding(10.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Text("时长设置", color = Color(0xFFE9F1FF), fontWeight = FontWeight.SemiBold)
+                        Text("时长设置", color = Color(0xFFF2F7FF), fontWeight = FontWeight.SemiBold)
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -1190,91 +1190,106 @@ private fun TimerConfigDialog(
                     }
                 }
 
-                Box {
-                    PickerButton(
-                        title = "结束音效",
-                        value = selectedTone.label,
-                        onClick = { toneMenuExpanded = true }
-                    )
-                    DropdownMenu(expanded = toneMenuExpanded, onDismissRequest = { toneMenuExpanded = false }) {
-                        ToneOption.entries.forEach { tone ->
-                            DropdownMenuItem(
-                                text = { Text(tone.label) },
-                                onClick = {
-                                    selectedTone = tone
-                                    toneMenuExpanded = false
-                                }
-                            )
-                        }
-                    }
-                }
-
-                Box {
-                    PickerButton(
-                        title = "样式",
-                        value = selectedStyle.label,
-                        onClick = { styleMenuExpanded = true }
-                    )
-                    DropdownMenu(expanded = styleMenuExpanded, onDismissRequest = { styleMenuExpanded = false }) {
-                        TimerStyle.entries.forEach { style ->
-                            DropdownMenuItem(
-                                text = {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                    ) {
-                                        StylePreviewDot(style = style, isRunning = true)
-                                        StylePreviewDot(style = style, isRunning = false)
-                                        Text(style.label)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Box(modifier = Modifier.weight(1f)) {
+                        PickerButton(
+                            title = "结束音效",
+                            value = selectedTone.label,
+                            onClick = { toneMenuExpanded = true }
+                        )
+                        DropdownMenu(expanded = toneMenuExpanded, onDismissRequest = { toneMenuExpanded = false }) {
+                            ToneOption.entries.forEach { tone ->
+                                DropdownMenuItem(
+                                    text = { Text(tone.label) },
+                                    onClick = {
+                                        selectedTone = tone
+                                        toneMenuExpanded = false
                                     }
-                                },
-                                onClick = {
-                                    selectedStyle = style
-                                    styleMenuExpanded = false
-                                }
-                            )
+                                )
+                            }
+                        }
+                    }
+                    Box(modifier = Modifier.weight(1f)) {
+                        PickerButton(
+                            title = "样式",
+                            value = selectedStyle.label,
+                            onClick = { styleMenuExpanded = true }
+                        )
+                        DropdownMenu(expanded = styleMenuExpanded, onDismissRequest = { styleMenuExpanded = false }) {
+                            TimerStyle.entries.forEach { style ->
+                                DropdownMenuItem(
+                                    text = {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            StylePreviewDot(style = style, isRunning = true)
+                                            StylePreviewDot(style = style, isRunning = false)
+                                            Text(style.label)
+                                        }
+                                    },
+                                    onClick = {
+                                        selectedStyle = style
+                                        styleMenuExpanded = false
+                                    }
+                                )
+                            }
                         }
                     }
                 }
 
-                Box {
-                    PickerButton(
-                        title = "最后滴答",
-                        value = selectedTickAlert.label,
-                        onClick = { tickMenuExpanded = true }
-                    )
-                    DropdownMenu(expanded = tickMenuExpanded, onDismissRequest = { tickMenuExpanded = false }) {
-                        TickAlertOption.entries.forEach { option ->
-                            DropdownMenuItem(
-                                text = { Text(option.label) },
-                                onClick = {
-                                    selectedTickAlert = option
-                                    tickMenuExpanded = false
-                                }
-                            )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Box(modifier = Modifier.weight(1f)) {
+                        PickerButton(
+                            title = "最后滴答",
+                            value = selectedTickAlert.label,
+                            onClick = { tickMenuExpanded = true }
+                        )
+                        DropdownMenu(expanded = tickMenuExpanded, onDismissRequest = { tickMenuExpanded = false }) {
+                            TickAlertOption.entries.forEach { option ->
+                                DropdownMenuItem(
+                                    text = { Text(option.label) },
+                                    onClick = {
+                                        selectedTickAlert = option
+                                        tickMenuExpanded = false
+                                    }
+                                )
+                            }
                         }
+                    }
+                    Button(
+                        onClick = onShowStats,
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFF2A4869),
+                            contentColor = Color(0xFFEFF6FF)
+                        )
+                    ) {
+                        Text("统计")
                     }
                 }
 
                 if (selectedTickAlert == TickAlertOption.Custom) {
-                    OutlinedTextField(
-                        value = customTickSecondsInput,
-                        onValueChange = { customTickSecondsInput = it.filter(Char::isDigit).take(2) },
-                        label = { Text("自定义秒数（1-30）") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
-
-                Button(
-                    onClick = onShowStats,
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = Color(0xFF223B56),
-                        contentColor = Color(0xFFE8F2FF)
-                    )
-                ) {
-                    Text("显示手动重开统计")
+                    Card(
+                        shape = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.cardColors(containerColor = Color(0xFF152A41))
+                    ) {
+                        OutlinedTextField(
+                            value = customTickSecondsInput,
+                            onValueChange = { customTickSecondsInput = it.filter(Char::isDigit).take(2) },
+                            label = { Text("自定义秒数（1-30）") },
+                            singleLine = true,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(10.dp)
+                        )
+                    }
                 }
             }
         },
@@ -1347,87 +1362,99 @@ private fun GlobalSettingsDialog(
         title = { Text("全局设置", color = Color(0xFFF3F7FF)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Box {
-                    PickerButton(
-                        title = "提醒模式",
-                        value = feedbackMode.label,
-                        onClick = { modeMenuExpanded = true }
-                    )
-                    DropdownMenu(
-                        expanded = modeMenuExpanded,
-                        onDismissRequest = { modeMenuExpanded = false }
-                    ) {
-                        FeedbackMode.entries.forEach { mode ->
-                            DropdownMenuItem(
-                                text = { Text(mode.label) },
-                                onClick = {
-                                    feedbackMode = mode
-                                    modeMenuExpanded = false
-                                }
-                            )
-                        }
-                    }
-                }
-                Box {
-                    PickerButton(
-                        title = "手势映射",
-                        value = gestureMode.label,
-                        onClick = { gestureMenuExpanded = true }
-                    )
-                    DropdownMenu(
-                        expanded = gestureMenuExpanded,
-                        onDismissRequest = { gestureMenuExpanded = false }
-                    ) {
-                        TapGestureMode.entries.forEach { mode ->
-                            DropdownMenuItem(
-                                text = { Text(mode.label) },
-                                onClick = {
-                                    gestureMode = mode
-                                    gestureMenuExpanded = false
-                                }
-                            )
-                        }
-                    }
-                }
-                Card(
-                    shape = RoundedCornerShape(12.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFF102235))
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 12.dp, vertical = 8.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "屏幕常亮（防烧屏）",
-                            color = Color(0xFFE4F0FF)
-                        )
-                        Switch(
-                            checked = keepScreenOn,
-                            onCheckedChange = { keepScreenOn = it }
-                        )
-                    }
-                }
-                Button(
-                    onClick = { exportHint = onExport() },
+                Row(
                     modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = Color(0xFF22415F),
-                        contentColor = Color(0xFFEAF3FF)
-                    )
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Text("导出所有记录")
+                    Box(modifier = Modifier.weight(1f)) {
+                        PickerButton(
+                            title = "提醒模式",
+                            value = feedbackMode.label,
+                            onClick = { modeMenuExpanded = true }
+                        )
+                        DropdownMenu(
+                            expanded = modeMenuExpanded,
+                            onDismissRequest = { modeMenuExpanded = false }
+                        ) {
+                            FeedbackMode.entries.forEach { mode ->
+                                DropdownMenuItem(
+                                    text = { Text(mode.label) },
+                                    onClick = {
+                                        feedbackMode = mode
+                                        modeMenuExpanded = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+                    Box(modifier = Modifier.weight(1f)) {
+                        PickerButton(
+                            title = "手势映射",
+                            value = gestureMode.label,
+                            onClick = { gestureMenuExpanded = true }
+                        )
+                        DropdownMenu(
+                            expanded = gestureMenuExpanded,
+                            onDismissRequest = { gestureMenuExpanded = false }
+                        ) {
+                            TapGestureMode.entries.forEach { mode ->
+                                DropdownMenuItem(
+                                    text = { Text(mode.label) },
+                                    onClick = {
+                                        gestureMode = mode
+                                        gestureMenuExpanded = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Card(
+                        shape = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.cardColors(containerColor = Color(0xFF152A41)),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 10.dp, vertical = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "屏幕常亮",
+                                color = Color(0xFFF0F6FF),
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Switch(
+                                checked = keepScreenOn,
+                                onCheckedChange = { keepScreenOn = it }
+                            )
+                        }
+                    }
+                    Button(
+                        onClick = { exportHint = onExport() },
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFF2A4869),
+                            contentColor = Color(0xFFEFF6FF)
+                        )
+                    ) {
+                        Text("导出记录")
+                    }
                 }
                 if (exportHint.isNotBlank()) {
                     Card(
                         shape = RoundedCornerShape(10.dp),
-                        colors = CardDefaults.cardColors(containerColor = Color(0xFF0F2236))
+                        colors = CardDefaults.cardColors(containerColor = Color(0xFF12263D))
                     ) {
                         Text(
                             text = exportHint,
-                            color = Color(0xFFD6E7FF),
+                            color = Color(0xFFE2EEFF),
                             modifier = Modifier.padding(10.dp)
                         )
                     }
