@@ -6,14 +6,20 @@ import android.content.Intent
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioTrack
+import android.os.Build
 import android.os.Bundle
 import android.os.SystemClock
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -23,6 +29,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -36,8 +43,11 @@ import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
@@ -54,6 +64,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
@@ -129,6 +140,24 @@ enum class ToneOption(
     DeepPluck("Deep Pluck", 139, 380, 0.58, 2)
 }
 
+enum class FeedbackMode(val label: String) {
+    SoundOnly("Pure Sound"),
+    VibrationOnly("Pure Vibration"),
+    SoundAndVibration("Sound + Vibration")
+}
+
+enum class TickAlertOption(val label: String) {
+    Off("Off"),
+    Last5Seconds("Last 5s"),
+    Last3Seconds("Last 3s"),
+    Custom("Custom")
+}
+
+data class GlobalSettings(
+    val feedbackMode: FeedbackMode = FeedbackMode.SoundOnly,
+    val keepScreenOn: Boolean = false
+)
+
 enum class TimerStyle(
     val label: String,
     val panelColor: Color,
@@ -186,14 +215,20 @@ data class CountdownItem(
     val remainingMillis: Long,
     val isRunning: Boolean,
     val tone: ToneOption,
-    val style: TimerStyle
+    val style: TimerStyle,
+    val tickAlert: TickAlertOption = TickAlertOption.Off,
+    val customTickSeconds: Int = 5
 )
 
 class CountdownViewModel(application: Application) : AndroidViewModel(application) {
     val timers = mutableStateListOf<CountdownItem>()
+    var globalSettings by mutableStateOf(GlobalSettings())
+        private set
 
     private val jobs = mutableStateMapOf<Long, Job>()
+    private val tickCueSecondCache = mutableStateMapOf<Long, Int>()
     private val toneMutex = Mutex()
+    private val appContext = application.applicationContext
     private val prefs = application.getSharedPreferences("countdown_state", Context.MODE_PRIVATE)
     private val stateKey = "timers_state_v1"
 
@@ -202,6 +237,23 @@ class CountdownViewModel(application: Application) : AndroidViewModel(applicatio
 
     init {
         restoreStateOrDefault()
+    }
+
+    fun updateGlobalSettings(
+        feedbackMode: FeedbackMode = globalSettings.feedbackMode,
+        keepScreenOn: Boolean = globalSettings.keepScreenOn
+    ) {
+        globalSettings = GlobalSettings(feedbackMode = feedbackMode, keepScreenOn = keepScreenOn)
+        persistNow()
+    }
+
+    private fun CountdownItem.tickWindowSeconds(): Int {
+        return when (tickAlert) {
+            TickAlertOption.Off -> 0
+            TickAlertOption.Last5Seconds -> 5
+            TickAlertOption.Last3Seconds -> 3
+            TickAlertOption.Custom -> customTickSeconds.coerceIn(1, 30)
+        }
     }
 
     fun addTimer() {
@@ -216,6 +268,7 @@ class CountdownViewModel(application: Application) : AndroidViewModel(applicatio
         if (timers.size <= 1) return
         jobs[timerId]?.cancel()
         jobs.remove(timerId)
+        tickCueSecondCache.remove(timerId)
         timers.removeAll { it.id == timerId }
         persistNow()
     }
@@ -241,23 +294,42 @@ class CountdownViewModel(application: Application) : AndroidViewModel(applicatio
         minutesText: String,
         secondsText: String,
         tone: ToneOption,
-        style: TimerStyle
+        style: TimerStyle,
+        tickAlert: TickAlertOption,
+        customTickSeconds: Int
     ) {
         val minutes = max(0, minutesText.toIntOrNull() ?: 0)
         val seconds = (secondsText.toIntOrNull() ?: 0).coerceIn(0, 59)
         val total = (minutes * 60L + seconds) * 1000L
         jobs[timerId]?.cancel()
+        tickCueSecondCache.remove(timerId)
 
         if (total <= 0L) {
             updateTimer(timerId) {
-                it.copy(totalMillis = 0L, remainingMillis = 0L, isRunning = false, tone = tone, style = style)
+                it.copy(
+                    totalMillis = 0L,
+                    remainingMillis = 0L,
+                    isRunning = false,
+                    tone = tone,
+                    style = style,
+                    tickAlert = tickAlert,
+                    customTickSeconds = customTickSeconds.coerceIn(1, 30)
+                )
             }
             persistNow()
             return
         }
 
         updateTimer(timerId) {
-            it.copy(totalMillis = total, remainingMillis = total, isRunning = true, tone = tone, style = style)
+            it.copy(
+                totalMillis = total,
+                remainingMillis = total,
+                isRunning = true,
+                tone = tone,
+                style = style,
+                tickAlert = tickAlert,
+                customTickSeconds = customTickSeconds.coerceIn(1, 30)
+            )
         }
         startLoop(timerId)
         persistNow()
@@ -282,6 +354,7 @@ class CountdownViewModel(application: Application) : AndroidViewModel(applicatio
         val timer = timers.firstOrNull { it.id == timerId } ?: return
         if (timer.totalMillis <= 0L) return
         updateTimer(timerId) { it.copy(remainingMillis = it.totalMillis, isRunning = true) }
+        tickCueSecondCache.remove(timerId)
         startLoop(timerId)
         playActionFeedback()
         persistNow()
@@ -292,6 +365,7 @@ class CountdownViewModel(application: Application) : AndroidViewModel(applicatio
         if (timer.totalMillis <= 0L) return
 
         jobs[timerId]?.cancel()
+        tickCueSecondCache.remove(timerId)
         jobs[timerId] = viewModelScope.launch {
             var lastTick = SystemClock.elapsedRealtime()
             while (true) {
@@ -305,6 +379,7 @@ class CountdownViewModel(application: Application) : AndroidViewModel(applicatio
 
                 val nextRemain = (current.remainingMillis - delta).coerceAtLeast(0L)
                 if (nextRemain > 0L) {
+                    maybePlayFinalTickCue(current, nextRemain)
                     updateTimer(timerId) { it.copy(remainingMillis = nextRemain) }
                     maybePersist()
                     continue
@@ -312,6 +387,7 @@ class CountdownViewModel(application: Application) : AndroidViewModel(applicatio
 
                 playTone(current.tone)
                 updateTimer(timerId) { it.copy(remainingMillis = it.totalMillis, isRunning = it.totalMillis > 0L) }
+                tickCueSecondCache.remove(timerId)
                 persistNow()
             }
         }
@@ -320,20 +396,89 @@ class CountdownViewModel(application: Application) : AndroidViewModel(applicatio
     private fun playTone(tone: ToneOption) {
         viewModelScope.launch {
             toneMutex.withLock {
-                repeat(tone.repeats) {
-                    playSyntheticTone(tone.frequencyHz, tone.burstMs, tone.velocity)
-                    delay(90L)
+                if (shouldPlaySound()) {
+                    repeat(tone.repeats) {
+                        playSyntheticTone(tone.frequencyHz, tone.burstMs, tone.velocity)
+                        delay(90L)
+                    }
+                }
+                if (shouldVibrate()) {
+                    vibrate(durationMs = 140L, amplitude = 200)
                 }
             }
         }
     }
 
-    // Unified non-configurable feedback sound for pause/resume/manual restart.
+    // Unified feedback for pause/resume/manual restart, controlled by global mode.
     private fun playActionFeedback() {
         viewModelScope.launch {
             toneMutex.withLock {
-                playSyntheticTone(frequencyHz = 392, durationMs = 85, velocity = 0.35)
+                if (shouldPlaySound()) {
+                    playSyntheticTone(frequencyHz = 392, durationMs = 85, velocity = 0.35)
+                }
+                if (shouldVibrate()) {
+                    vibrate(durationMs = 55L, amplitude = 160)
+                }
             }
+        }
+    }
+
+    private fun maybePlayFinalTickCue(timer: CountdownItem, nextRemain: Long) {
+        val tickWindow = timer.tickWindowSeconds()
+        if (tickWindow <= 0) {
+            tickCueSecondCache.remove(timer.id)
+            return
+        }
+
+        val beforeSecond = ceil(timer.remainingMillis / 1000.0).toInt()
+        val afterSecond = ceil(nextRemain / 1000.0).toInt()
+        if (afterSecond >= beforeSecond) return
+
+        val alertedSecond = tickCueSecondCache[timer.id]
+        for (sec in (beforeSecond - 1) downTo afterSecond) {
+            if (sec in 1..tickWindow && (alertedSecond == null || sec < alertedSecond)) {
+                playTickCue()
+                tickCueSecondCache[timer.id] = sec
+            }
+        }
+    }
+
+    private fun playTickCue() {
+        viewModelScope.launch {
+            toneMutex.withLock {
+                if (shouldPlaySound()) {
+                    playSyntheticTone(frequencyHz = 960, durationMs = 55, velocity = 0.30)
+                }
+                if (shouldVibrate()) {
+                    vibrate(durationMs = 30L, amplitude = 120)
+                }
+            }
+        }
+    }
+
+    private fun shouldPlaySound(): Boolean = globalSettings.feedbackMode != FeedbackMode.VibrationOnly
+
+    private fun shouldVibrate(): Boolean = globalSettings.feedbackMode != FeedbackMode.SoundOnly
+
+    private fun vibrate(durationMs: Long, amplitude: Int) {
+        val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            appContext.getSystemService(VibratorManager::class.java)?.defaultVibrator
+        } else {
+            @Suppress("DEPRECATION")
+            appContext.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+        } ?: return
+
+        if (!vibrator.hasVibrator()) return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            vibrator.vibrate(
+                VibrationEffect.createOneShot(
+                    durationMs,
+                    amplitude.coerceIn(1, 255)
+                )
+            )
+        } else {
+            @Suppress("DEPRECATION")
+            vibrator.vibrate(durationMs)
         }
     }
 
@@ -408,6 +553,13 @@ class CountdownViewModel(application: Application) : AndroidViewModel(applicatio
             val savedAt = root.optLong("savedAtEpochMs", System.currentTimeMillis())
             val elapsed = (System.currentTimeMillis() - savedAt).coerceAtLeast(0L)
             val arr = root.optJSONArray("timers") ?: JSONArray()
+            val globalObj = root.optJSONObject("global") ?: JSONObject()
+            globalSettings = GlobalSettings(
+                feedbackMode = FeedbackMode.entries.getOrElse(
+                    globalObj.optInt("feedbackMode", FeedbackMode.SoundOnly.ordinal)
+                ) { FeedbackMode.SoundOnly },
+                keepScreenOn = globalObj.optBoolean("keepScreenOn", false)
+            )
             val restored = mutableListOf<CountdownItem>()
             var maxId = 0L
 
@@ -419,6 +571,10 @@ class CountdownViewModel(application: Application) : AndroidViewModel(applicatio
                 val wasRunning = obj.optBoolean("isRunning", false)
                 val tone = ToneOption.entries.getOrElse(obj.optInt("tone", 0)) { ToneOption.PianoC3 }
                 val style = TimerStyle.entries.getOrElse(obj.optInt("style", 0)) { TimerStyle.Slate }
+                val tickAlert = TickAlertOption.entries.getOrElse(
+                    obj.optInt("tickAlert", TickAlertOption.Off.ordinal)
+                ) { TickAlertOption.Off }
+                val customTickSeconds = obj.optInt("customTickSeconds", 5).coerceIn(1, 30)
 
                 val remain = if (!wasRunning || total <= 0L) {
                     remainSaved.coerceIn(0L, total)
@@ -436,7 +592,9 @@ class CountdownViewModel(application: Application) : AndroidViewModel(applicatio
                     remainingMillis = remain.coerceIn(0L, total),
                     isRunning = wasRunning && total > 0L,
                     tone = tone,
-                    style = style
+                    style = style,
+                    tickAlert = tickAlert,
+                    customTickSeconds = customTickSeconds
                 )
                 if (id > maxId) maxId = id
             }
@@ -474,11 +632,17 @@ class CountdownViewModel(application: Application) : AndroidViewModel(applicatio
                     .put("isRunning", t.isRunning)
                     .put("tone", t.tone.ordinal)
                     .put("style", t.style.ordinal)
+                    .put("tickAlert", t.tickAlert.ordinal)
+                    .put("customTickSeconds", t.customTickSeconds)
             )
         }
+        val global = JSONObject()
+            .put("feedbackMode", globalSettings.feedbackMode.ordinal)
+            .put("keepScreenOn", globalSettings.keepScreenOn)
         val root = JSONObject()
             .put("idSeed", idSeed)
             .put("savedAtEpochMs", now)
+            .put("global", global)
             .put("timers", arr)
         prefs.edit().putString(stateKey, root.toString()).apply()
         lastPersistMs = now
@@ -492,13 +656,41 @@ class CountdownViewModel(application: Application) : AndroidViewModel(applicatio
     override fun onCleared() {
         persistNow()
         jobs.values.forEach { it.cancel() }
+        tickCueSecondCache.clear()
         super.onCleared()
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun CountdownScreen(vm: CountdownViewModel) {
     var configTimerId by remember { mutableStateOf<Long?>(null) }
+    var showGlobalSettings by remember { mutableStateOf(false) }
+    var burnInStep by remember { mutableStateOf(0) }
+    val view = LocalView.current
+
+    DisposableEffect(vm.globalSettings.keepScreenOn) {
+        view.keepScreenOn = vm.globalSettings.keepScreenOn
+        onDispose { view.keepScreenOn = false }
+    }
+
+    LaunchedEffect(vm.globalSettings.keepScreenOn) {
+        burnInStep = 0
+        if (!vm.globalSettings.keepScreenOn) return@LaunchedEffect
+        while (true) {
+            delay(28_000L)
+            burnInStep = (burnInStep + 1) % 5
+        }
+    }
+
+    val burnInOffsets = listOf(
+        0.dp to 0.dp,
+        2.dp to 1.dp,
+        1.dp to 3.dp,
+        3.dp to 2.dp,
+        1.dp to 2.dp
+    )
+    val currentOffset = if (vm.globalSettings.keepScreenOn) burnInOffsets[burnInStep] else burnInOffsets[0]
 
     BoxWithConstraints(
         modifier = Modifier
@@ -533,6 +725,7 @@ fun CountdownScreen(vm: CountdownViewModel) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
+                .offset(x = currentOffset.first, y = currentOffset.second)
                 .padding(screenPadding),
             verticalArrangement = Arrangement.spacedBy(gridGap)
         ) {
@@ -570,10 +763,14 @@ fun CountdownScreen(vm: CountdownViewModel) {
         }
 
         FloatingActionButton(
-            onClick = { vm.addTimer() },
+            onClick = {},
             containerColor = Color(0xFF1B3A57).copy(alpha = 0.45f),
             contentColor = Color(0xFFEAF2FF).copy(alpha = 0.82f),
             modifier = Modifier
+                .combinedClickable(
+                    onClick = { vm.addTimer() },
+                    onLongClick = { showGlobalSettings = true }
+                )
                 .align(Alignment.BottomEnd)
                 .alpha(0.72f)
                 .padding(20.dp)
@@ -588,13 +785,32 @@ fun CountdownScreen(vm: CountdownViewModel) {
                 timer = selected,
                 canDelete = vm.timers.size > 1,
                 onDismiss = { configTimerId = null },
-                onConfirm = { min, sec, tone, style ->
-                    vm.configureTimer(selected.id, min, sec, tone, style)
+                onConfirm = { min, sec, tone, style, tickAlert, customTickSeconds ->
+                    vm.configureTimer(
+                        timerId = selected.id,
+                        minutesText = min,
+                        secondsText = sec,
+                        tone = tone,
+                        style = style,
+                        tickAlert = tickAlert,
+                        customTickSeconds = customTickSeconds
+                    )
                     configTimerId = null
                 },
                 onDelete = {
                     vm.removeTimer(selected.id)
                     configTimerId = null
+                }
+            )
+        }
+
+        if (showGlobalSettings) {
+            GlobalSettingsDialog(
+                settings = vm.globalSettings,
+                onDismiss = { showGlobalSettings = false },
+                onApply = { feedbackMode, keepScreenOn ->
+                    vm.updateGlobalSettings(feedbackMode = feedbackMode, keepScreenOn = keepScreenOn)
+                    showGlobalSettings = false
                 }
             )
         }
@@ -696,7 +912,7 @@ private fun TimerConfigDialog(
     timer: CountdownItem,
     canDelete: Boolean,
     onDismiss: () -> Unit,
-    onConfirm: (String, String, ToneOption, TimerStyle) -> Unit,
+    onConfirm: (String, String, ToneOption, TimerStyle, TickAlertOption, Int) -> Unit,
     onDelete: () -> Unit
 ) {
     var minuteInput by remember(timer.id, timer.totalMillis) {
@@ -707,8 +923,13 @@ private fun TimerConfigDialog(
     }
     var selectedTone by remember(timer.id, timer.tone) { mutableStateOf(timer.tone) }
     var selectedStyle by remember(timer.id, timer.style) { mutableStateOf(timer.style) }
+    var selectedTickAlert by remember(timer.id, timer.tickAlert) { mutableStateOf(timer.tickAlert) }
+    var customTickSecondsInput by remember(timer.id, timer.customTickSeconds) {
+        mutableStateOf(timer.customTickSeconds.toString())
+    }
     var toneMenuExpanded by remember(timer.id) { mutableStateOf(false) }
     var styleMenuExpanded by remember(timer.id) { mutableStateOf(false) }
+    var tickMenuExpanded by remember(timer.id) { mutableStateOf(false) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -768,10 +989,46 @@ private fun TimerConfigDialog(
                         }
                     }
                 }
+                Box {
+                    Button(onClick = { tickMenuExpanded = true }) {
+                        Text("Tick: ${selectedTickAlert.label}")
+                    }
+                    DropdownMenu(expanded = tickMenuExpanded, onDismissRequest = { tickMenuExpanded = false }) {
+                        TickAlertOption.entries.forEach { option ->
+                            DropdownMenuItem(
+                                text = { Text(option.label) },
+                                onClick = {
+                                    selectedTickAlert = option
+                                    tickMenuExpanded = false
+                                }
+                            )
+                        }
+                    }
+                }
+                if (selectedTickAlert == TickAlertOption.Custom) {
+                    OutlinedTextField(
+                        value = customTickSecondsInput,
+                        onValueChange = { customTickSecondsInput = it.filter(Char::isDigit).take(2) },
+                        label = { Text("Custom Tick Seconds") },
+                        singleLine = true
+                    )
+                }
             }
         },
         confirmButton = {
-            Button(onClick = { onConfirm(minuteInput, secondInput, selectedTone, selectedStyle) }) {
+            Button(
+                onClick = {
+                    val customTickSeconds = customTickSecondsInput.toIntOrNull()?.coerceIn(1, 30) ?: 5
+                    onConfirm(
+                        minuteInput,
+                        secondInput,
+                        selectedTone,
+                        selectedStyle,
+                        selectedTickAlert,
+                        customTickSeconds
+                    )
+                }
+            ) {
                 Text("Apply")
             }
         },
@@ -785,6 +1042,76 @@ private fun TimerConfigDialog(
                 Button(onClick = onDismiss) {
                     Text("Cancel")
                 }
+            }
+        }
+    )
+}
+
+@Composable
+private fun GlobalSettingsDialog(
+    settings: GlobalSettings,
+    onDismiss: () -> Unit,
+    onApply: (FeedbackMode, Boolean) -> Unit
+) {
+    var feedbackMode by remember(settings.feedbackMode) { mutableStateOf(settings.feedbackMode) }
+    var keepScreenOn by remember(settings.keepScreenOn) { mutableStateOf(settings.keepScreenOn) }
+    var modeMenuExpanded by remember { mutableStateOf(false) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Global Settings") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Box {
+                    Button(onClick = { modeMenuExpanded = true }) {
+                        Text("Feedback: ${feedbackMode.label}")
+                    }
+                    DropdownMenu(
+                        expanded = modeMenuExpanded,
+                        onDismissRequest = { modeMenuExpanded = false }
+                    ) {
+                        FeedbackMode.entries.forEach { mode ->
+                            DropdownMenuItem(
+                                text = { Text(mode.label) },
+                                onClick = {
+                                    feedbackMode = mode
+                                    modeMenuExpanded = false
+                                }
+                            )
+                        }
+                    }
+                }
+                Card(
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF102235))
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Keep Screen On (Anti Burn-in)",
+                            color = Color(0xFFE4F0FF)
+                        )
+                        Switch(
+                            checked = keepScreenOn,
+                            onCheckedChange = { keepScreenOn = it }
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(onClick = { onApply(feedbackMode, keepScreenOn) }) {
+                Text("Apply")
+            }
+        },
+        dismissButton = {
+            Button(onClick = onDismiss) {
+                Text("Cancel")
             }
         }
     )
