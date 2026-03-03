@@ -86,6 +86,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -425,7 +426,7 @@ class CountdownViewModel(application: Application) : AndroidViewModel(applicatio
             val firstSec = g.first().durationSeconds
             val endTime = endTimeFmt.format(Date(g.last().epochMs))
             RestartStatsGroup(
-                title = "${firstSec}秒 / $endTime",
+                title = "$endTime",
                 seconds = g.map { it.durationSeconds }
             )
         }.reversed()
@@ -455,6 +456,52 @@ class CountdownViewModel(application: Application) : AndroidViewModel(applicatio
                 updateTimer(id) { it.copy(isRunning = true) }
                 startLoop(id)
             }
+        }
+    }
+
+    fun exportAllRecords(): String {
+        return runCatching {
+            val dir = appContext.getExternalFilesDir(null) ?: appContext.filesDir
+            val ts = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
+            val outFile = File(dir, "countdown_records_$ts.txt")
+            val lineTime = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
+
+            val content = buildString {
+                appendLine("Multi Countdown Records Export")
+                appendLine("Export Time: ${lineTime.format(Date())}")
+                appendLine("FeedbackMode: ${globalSettings.feedbackMode.label}")
+                appendLine("KeepScreenOn: ${globalSettings.keepScreenOn}")
+                appendLine("GestureMode: ${globalSettings.gestureMode.label}")
+                appendLine("================================")
+
+                timers.forEach { timer ->
+                    appendLine("Timer #${timer.id}")
+                    appendLine("Records: ${timer.manualRestartRecords.size}")
+                    if (timer.manualRestartRecords.isEmpty()) {
+                        appendLine("  (none)")
+                    } else {
+                        timer.manualRestartRecords.sortedBy { it.epochMs }.forEach { rec ->
+                            appendLine(
+                                "  - ${lineTime.format(Date(rec.epochMs))} | ${rec.durationSeconds} sec"
+                            )
+                        }
+                    }
+                    val groups = restartStats(timer.id)
+                    if (groups.isNotEmpty()) {
+                        appendLine("  Groups:")
+                        groups.forEach { group ->
+                            appendLine("    * ${group.title}")
+                            appendLine("      ${group.seconds.joinToString(", ") { \"${it}s\" }}")
+                        }
+                    }
+                    appendLine("--------------------------------")
+                }
+            }
+
+            outFile.writeText(content, Charsets.UTF_8)
+            outFile.absolutePath
+        }.getOrElse {
+            "导出失败: ${it.message ?: "未知错误"}"
         }
     }
 
@@ -979,7 +1026,8 @@ fun CountdownScreen(vm: CountdownViewModel) {
                         gestureMode = gestureMode
                     )
                     showGlobalSettings = false
-                }
+                },
+                onExport = { vm.exportAllRecords() }
             )
         }
     }
@@ -1284,13 +1332,15 @@ private fun PickerButton(
 private fun GlobalSettingsDialog(
     settings: GlobalSettings,
     onDismiss: () -> Unit,
-    onApply: (FeedbackMode, Boolean, TapGestureMode) -> Unit
+    onApply: (FeedbackMode, Boolean, TapGestureMode) -> Unit,
+    onExport: () -> String
 ) {
     var feedbackMode by remember(settings.feedbackMode) { mutableStateOf(settings.feedbackMode) }
     var keepScreenOn by remember(settings.keepScreenOn) { mutableStateOf(settings.keepScreenOn) }
     var gestureMode by remember(settings.gestureMode) { mutableStateOf(settings.gestureMode) }
     var modeMenuExpanded by remember { mutableStateOf(false) }
     var gestureMenuExpanded by remember { mutableStateOf(false) }
+    var exportHint by remember { mutableStateOf("") }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -1357,6 +1407,28 @@ private fun GlobalSettingsDialog(
                         Switch(
                             checked = keepScreenOn,
                             onCheckedChange = { keepScreenOn = it }
+                        )
+                    }
+                }
+                Button(
+                    onClick = { exportHint = onExport() },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFF22415F),
+                        contentColor = Color(0xFFEAF3FF)
+                    )
+                ) {
+                    Text("导出所有记录")
+                }
+                if (exportHint.isNotBlank()) {
+                    Card(
+                        shape = RoundedCornerShape(10.dp),
+                        colors = CardDefaults.cardColors(containerColor = Color(0xFF0F2236))
+                    ) {
+                        Text(
+                            text = exportHint,
+                            color = Color(0xFFD6E7FF),
+                            modifier = Modifier.padding(10.dp)
                         )
                     }
                 }
@@ -1428,7 +1500,7 @@ private fun RestartStatsDialog(
                                                 modifier = Modifier.weight(1f)
                                             ) {
                                                 Text(
-                                                    text = "${sec}秒",
+                                                    text = "${sec}",
                                                     color = Color(0xFFE5F0FF),
                                                     textAlign = TextAlign.Center,
                                                     modifier = Modifier
