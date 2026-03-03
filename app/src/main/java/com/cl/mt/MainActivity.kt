@@ -36,6 +36,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
@@ -85,6 +86,9 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import kotlin.math.ceil
 import kotlin.math.max
 import kotlin.math.sin
@@ -153,9 +157,25 @@ enum class TickAlertOption(val label: String) {
     Custom("自定义")
 }
 
+enum class TapGestureMode(val label: String) {
+    SinglePauseDoubleRestart("单击暂停 / 双击重开"),
+    SingleRestartDoublePause("单击重开 / 双击暂停")
+}
+
 data class GlobalSettings(
     val feedbackMode: FeedbackMode = FeedbackMode.SoundOnly,
-    val keepScreenOn: Boolean = false
+    val keepScreenOn: Boolean = false,
+    val gestureMode: TapGestureMode = TapGestureMode.SinglePauseDoubleRestart
+)
+
+data class ManualRestartRecord(
+    val epochMs: Long,
+    val durationSeconds: Long
+)
+
+data class RestartStatsGroup(
+    val title: String,
+    val seconds: List<Long>
 )
 
 enum class TimerStyle(
@@ -217,7 +237,9 @@ data class CountdownItem(
     val tone: ToneOption,
     val style: TimerStyle,
     val tickAlert: TickAlertOption = TickAlertOption.Off,
-    val customTickSeconds: Int = 5
+    val customTickSeconds: Int = 5,
+    val manualRestartAnchorEpochMs: Long = System.currentTimeMillis(),
+    val manualRestartRecords: List<ManualRestartRecord> = emptyList()
 )
 
 class CountdownViewModel(application: Application) : AndroidViewModel(application) {
@@ -234,6 +256,7 @@ class CountdownViewModel(application: Application) : AndroidViewModel(applicatio
 
     private var idSeed = 1L
     private var lastPersistMs = 0L
+    private var pausedByStatsOverlay: Set<Long> = emptySet()
 
     init {
         restoreStateOrDefault()
@@ -241,9 +264,14 @@ class CountdownViewModel(application: Application) : AndroidViewModel(applicatio
 
     fun updateGlobalSettings(
         feedbackMode: FeedbackMode = globalSettings.feedbackMode,
-        keepScreenOn: Boolean = globalSettings.keepScreenOn
+        keepScreenOn: Boolean = globalSettings.keepScreenOn,
+        gestureMode: TapGestureMode = globalSettings.gestureMode
     ) {
-        globalSettings = GlobalSettings(feedbackMode = feedbackMode, keepScreenOn = keepScreenOn)
+        globalSettings = GlobalSettings(
+            feedbackMode = feedbackMode,
+            keepScreenOn = keepScreenOn,
+            gestureMode = gestureMode
+        )
         persistNow()
     }
 
@@ -283,7 +311,8 @@ class CountdownViewModel(application: Application) : AndroidViewModel(applicatio
                 remainingMillis = total,
                 isRunning = true,
                 tone = tone,
-                style = style
+                style = style,
+                manualRestartAnchorEpochMs = System.currentTimeMillis()
             )
         )
         startLoop(id)
@@ -313,7 +342,8 @@ class CountdownViewModel(application: Application) : AndroidViewModel(applicatio
                     tone = tone,
                     style = style,
                     tickAlert = tickAlert,
-                    customTickSeconds = customTickSeconds.coerceIn(1, 30)
+                    customTickSeconds = customTickSeconds.coerceIn(1, 30),
+                    manualRestartAnchorEpochMs = System.currentTimeMillis()
                 )
             }
             persistNow()
@@ -328,7 +358,8 @@ class CountdownViewModel(application: Application) : AndroidViewModel(applicatio
                 tone = tone,
                 style = style,
                 tickAlert = tickAlert,
-                customTickSeconds = customTickSeconds.coerceIn(1, 30)
+                customTickSeconds = customTickSeconds.coerceIn(1, 30),
+                manualRestartAnchorEpochMs = System.currentTimeMillis()
             )
         }
         startLoop(timerId)
@@ -353,11 +384,78 @@ class CountdownViewModel(application: Application) : AndroidViewModel(applicatio
     fun restartNow(timerId: Long) {
         val timer = timers.firstOrNull { it.id == timerId } ?: return
         if (timer.totalMillis <= 0L) return
-        updateTimer(timerId) { it.copy(remainingMillis = it.totalMillis, isRunning = true) }
+        val now = System.currentTimeMillis()
+        val durationSec = ((now - timer.manualRestartAnchorEpochMs).coerceAtLeast(0L)) / 1000L
+        val nextRecords = (timer.manualRestartRecords + ManualRestartRecord(now, durationSec)).takeLast(600)
+        updateTimer(timerId) {
+            it.copy(
+                remainingMillis = it.totalMillis,
+                isRunning = true,
+                manualRestartAnchorEpochMs = now,
+                manualRestartRecords = nextRecords
+            )
+        }
         tickCueSecondCache.remove(timerId)
         startLoop(timerId)
         playActionFeedback()
         persistNow()
+    }
+
+    fun restartStats(timerId: Long): List<RestartStatsGroup> {
+        val timer = timers.firstOrNull { it.id == timerId } ?: return emptyList()
+        if (timer.manualRestartRecords.isEmpty()) return emptyList()
+
+        val sorted = timer.manualRestartRecords.sortedBy { it.epochMs }
+        val groups = mutableListOf<List<ManualRestartRecord>>()
+        var current = mutableListOf(sorted.first())
+        for (idx in 1 until sorted.size) {
+            val prev = sorted[idx - 1]
+            val rec = sorted[idx]
+            if (rec.epochMs - prev.epochMs > 60L * 60_000L) {
+                groups += current.toList()
+                current = mutableListOf(rec)
+            } else {
+                current += rec
+            }
+        }
+        groups += current.toList()
+
+        val endTimeFmt = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
+        return groups.map { g ->
+            val firstSec = g.first().durationSeconds
+            val endTime = endTimeFmt.format(Date(g.last().epochMs))
+            RestartStatsGroup(
+                title = "${firstSec}秒 / $endTime",
+                seconds = g.map { it.durationSeconds }
+            )
+        }.reversed()
+    }
+
+    fun onStatsDialogVisibilityChanged(visible: Boolean) {
+        if (visible) {
+            if (pausedByStatsOverlay.isNotEmpty()) return
+            val runningIds = timers
+                .filter { it.isRunning && it.totalMillis > 0L }
+                .map { it.id }
+                .toSet()
+            pausedByStatsOverlay = runningIds
+            runningIds.forEach { id ->
+                jobs[id]?.cancel()
+                updateTimer(id) { it.copy(isRunning = false) }
+            }
+            return
+        }
+
+        if (pausedByStatsOverlay.isEmpty()) return
+        val toResume = pausedByStatsOverlay
+        pausedByStatsOverlay = emptySet()
+        toResume.forEach { id ->
+            val timer = timers.firstOrNull { it.id == id } ?: return@forEach
+            if (!timer.isRunning && timer.totalMillis > 0L) {
+                updateTimer(id) { it.copy(isRunning = true) }
+                startLoop(id)
+            }
+        }
     }
 
     private fun startLoop(timerId: Long) {
@@ -558,7 +656,10 @@ class CountdownViewModel(application: Application) : AndroidViewModel(applicatio
                 feedbackMode = FeedbackMode.entries.getOrElse(
                     globalObj.optInt("feedbackMode", FeedbackMode.SoundOnly.ordinal)
                 ) { FeedbackMode.SoundOnly },
-                keepScreenOn = globalObj.optBoolean("keepScreenOn", false)
+                keepScreenOn = globalObj.optBoolean("keepScreenOn", false),
+                gestureMode = TapGestureMode.entries.getOrElse(
+                    globalObj.optInt("gestureMode", TapGestureMode.SinglePauseDoubleRestart.ordinal)
+                ) { TapGestureMode.SinglePauseDoubleRestart }
             )
             val restored = mutableListOf<CountdownItem>()
             var maxId = 0L
@@ -575,6 +676,24 @@ class CountdownViewModel(application: Application) : AndroidViewModel(applicatio
                     obj.optInt("tickAlert", TickAlertOption.Off.ordinal)
                 ) { TickAlertOption.Off }
                 val customTickSeconds = obj.optInt("customTickSeconds", 5).coerceIn(1, 30)
+                val manualAnchor = obj.optLong("manualRestartAnchorEpochMs", savedAt)
+                val recordsArr = obj.optJSONArray("manualRestartRecords") ?: JSONArray()
+                val records = buildList {
+                    for (j in 0 until recordsArr.length()) {
+                        val r = recordsArr.optJSONObject(j) ?: continue
+                        val sec = if (r.has("durationSeconds")) {
+                            r.optLong("durationSeconds", 0L)
+                        } else {
+                            r.optLong("durationMinutes", 0L) * 60L
+                        }
+                        add(
+                            ManualRestartRecord(
+                                epochMs = r.optLong("epochMs", 0L),
+                                durationSeconds = sec.coerceAtLeast(0L)
+                            )
+                        )
+                    }
+                }
 
                 val remain = if (!wasRunning || total <= 0L) {
                     remainSaved.coerceIn(0L, total)
@@ -594,7 +713,9 @@ class CountdownViewModel(application: Application) : AndroidViewModel(applicatio
                     tone = tone,
                     style = style,
                     tickAlert = tickAlert,
-                    customTickSeconds = customTickSeconds
+                    customTickSeconds = customTickSeconds,
+                    manualRestartAnchorEpochMs = manualAnchor,
+                    manualRestartRecords = records
                 )
                 if (id > maxId) maxId = id
             }
@@ -624,6 +745,14 @@ class CountdownViewModel(application: Application) : AndroidViewModel(applicatio
         val now = System.currentTimeMillis()
         val arr = JSONArray()
         timers.forEach { t ->
+            val records = JSONArray()
+            t.manualRestartRecords.forEach { r ->
+                records.put(
+                    JSONObject()
+                        .put("epochMs", r.epochMs)
+                        .put("durationSeconds", r.durationSeconds)
+                )
+            }
             arr.put(
                 JSONObject()
                     .put("id", t.id)
@@ -634,11 +763,14 @@ class CountdownViewModel(application: Application) : AndroidViewModel(applicatio
                     .put("style", t.style.ordinal)
                     .put("tickAlert", t.tickAlert.ordinal)
                     .put("customTickSeconds", t.customTickSeconds)
+                    .put("manualRestartAnchorEpochMs", t.manualRestartAnchorEpochMs)
+                    .put("manualRestartRecords", records)
             )
         }
         val global = JSONObject()
             .put("feedbackMode", globalSettings.feedbackMode.ordinal)
             .put("keepScreenOn", globalSettings.keepScreenOn)
+            .put("gestureMode", globalSettings.gestureMode.ordinal)
         val root = JSONObject()
             .put("idSeed", idSeed)
             .put("savedAtEpochMs", now)
@@ -664,9 +796,11 @@ class CountdownViewModel(application: Application) : AndroidViewModel(applicatio
 @Composable
 fun CountdownScreen(vm: CountdownViewModel) {
     var configTimerId by remember { mutableStateOf<Long?>(null) }
+    var statsTimerId by remember { mutableStateOf<Long?>(null) }
     var showGlobalSettings by remember { mutableStateOf(false) }
     var burnInStep by remember { mutableStateOf(0) }
     val view = LocalView.current
+    val statsVisible = statsTimerId != null
 
     DisposableEffect(vm.globalSettings.keepScreenOn) {
         view.keepScreenOn = vm.globalSettings.keepScreenOn
@@ -680,6 +814,10 @@ fun CountdownScreen(vm: CountdownViewModel) {
             delay(28_000L)
             burnInStep = (burnInStep + 1) % 5
         }
+    }
+
+    LaunchedEffect(statsVisible) {
+        vm.onStatsDialogVisibilityChanged(statsVisible)
     }
 
     val burnInOffsets = listOf(
@@ -744,8 +882,18 @@ fun CountdownScreen(vm: CountdownViewModel) {
                             CountdownOnlyCard(
                                 timer = timer,
                                 ringSize = ringSize,
-                                onTap = { vm.togglePauseResume(timer.id) },
-                                onDoubleTap = { vm.restartNow(timer.id) },
+                                onTap = {
+                                    when (vm.globalSettings.gestureMode) {
+                                        TapGestureMode.SinglePauseDoubleRestart -> vm.togglePauseResume(timer.id)
+                                        TapGestureMode.SingleRestartDoublePause -> vm.restartNow(timer.id)
+                                    }
+                                },
+                                onDoubleTap = {
+                                    when (vm.globalSettings.gestureMode) {
+                                        TapGestureMode.SinglePauseDoubleRestart -> vm.restartNow(timer.id)
+                                        TapGestureMode.SingleRestartDoublePause -> vm.togglePauseResume(timer.id)
+                                    }
+                                },
                                 onLongPress = { configTimerId = timer.id }
                             )
                         }
@@ -805,7 +953,18 @@ fun CountdownScreen(vm: CountdownViewModel) {
                 onDelete = {
                     vm.removeTimer(selected.id)
                     configTimerId = null
+                },
+                onShowStats = {
+                    statsTimerId = selected.id
                 }
+            )
+        }
+
+        val statsTarget = statsTimerId
+        if (statsTarget != null) {
+            RestartStatsDialog(
+                groups = vm.restartStats(statsTarget),
+                onDismiss = { statsTimerId = null }
             )
         }
 
@@ -813,8 +972,12 @@ fun CountdownScreen(vm: CountdownViewModel) {
             GlobalSettingsDialog(
                 settings = vm.globalSettings,
                 onDismiss = { showGlobalSettings = false },
-                onApply = { feedbackMode, keepScreenOn ->
-                    vm.updateGlobalSettings(feedbackMode = feedbackMode, keepScreenOn = keepScreenOn)
+                onApply = { feedbackMode, keepScreenOn, gestureMode ->
+                    vm.updateGlobalSettings(
+                        feedbackMode = feedbackMode,
+                        keepScreenOn = keepScreenOn,
+                        gestureMode = gestureMode
+                    )
                     showGlobalSettings = false
                 }
             )
@@ -918,7 +1081,8 @@ private fun TimerConfigDialog(
     canDelete: Boolean,
     onDismiss: () -> Unit,
     onConfirm: (String, String, ToneOption, TimerStyle, TickAlertOption, Int) -> Unit,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    onShowStats: () -> Unit
 ) {
     var minuteInput by remember(timer.id, timer.totalMillis) {
         mutableStateOf((timer.totalMillis / 1000 / 60).toString())
@@ -939,7 +1103,7 @@ private fun TimerConfigDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("倒计时设置") },
+        title = { Text("倒计时设置", color = Color(0xFFF3F7FF)) },
         text = {
             Column(
                 modifier = Modifier
@@ -951,26 +1115,30 @@ private fun TimerConfigDialog(
                     shape = RoundedCornerShape(12.dp),
                     colors = CardDefaults.cardColors(containerColor = Color(0xFF102235))
                 ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(10.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    Column(
+                        modifier = Modifier.padding(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        OutlinedTextField(
-                            value = minuteInput,
-                            onValueChange = { minuteInput = it.filter(Char::isDigit).take(3) },
-                            label = { Text("分钟") },
-                            singleLine = true,
-                            modifier = Modifier.weight(1f)
-                        )
-                        OutlinedTextField(
-                            value = secondInput,
-                            onValueChange = { secondInput = it.filter(Char::isDigit).take(2) },
-                            label = { Text("秒") },
-                            singleLine = true,
-                            modifier = Modifier.weight(1f)
-                        )
+                        Text("时长设置", color = Color(0xFFE9F1FF), fontWeight = FontWeight.SemiBold)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedTextField(
+                                value = minuteInput,
+                                onValueChange = { minuteInput = it.filter(Char::isDigit).take(3) },
+                                label = { Text("分钟") },
+                                singleLine = true,
+                                modifier = Modifier.weight(1f)
+                            )
+                            OutlinedTextField(
+                                value = secondInput,
+                                onValueChange = { secondInput = it.filter(Char::isDigit).take(2) },
+                                label = { Text("秒") },
+                                singleLine = true,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
                     }
                 }
 
@@ -1049,6 +1217,17 @@ private fun TimerConfigDialog(
                         modifier = Modifier.fillMaxWidth()
                     )
                 }
+
+                Button(
+                    onClick = onShowStats,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFF223B56),
+                        contentColor = Color(0xFFE8F2FF)
+                    )
+                ) {
+                    Text("显示手动重开统计")
+                }
             }
         },
         confirmButton = {
@@ -1091,7 +1270,11 @@ private fun PickerButton(
 ) {
     Button(
         onClick = onClick,
-        modifier = Modifier.fillMaxWidth()
+        modifier = Modifier.fillMaxWidth(),
+        colors = ButtonDefaults.buttonColors(
+            containerColor = Color(0xFF1E3550),
+            contentColor = Color(0xFFEAF3FF)
+        )
     ) {
         Text("$title: $value")
     }
@@ -1101,15 +1284,17 @@ private fun PickerButton(
 private fun GlobalSettingsDialog(
     settings: GlobalSettings,
     onDismiss: () -> Unit,
-    onApply: (FeedbackMode, Boolean) -> Unit
+    onApply: (FeedbackMode, Boolean, TapGestureMode) -> Unit
 ) {
     var feedbackMode by remember(settings.feedbackMode) { mutableStateOf(settings.feedbackMode) }
     var keepScreenOn by remember(settings.keepScreenOn) { mutableStateOf(settings.keepScreenOn) }
+    var gestureMode by remember(settings.gestureMode) { mutableStateOf(settings.gestureMode) }
     var modeMenuExpanded by remember { mutableStateOf(false) }
+    var gestureMenuExpanded by remember { mutableStateOf(false) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("全局设置") },
+        title = { Text("全局设置", color = Color(0xFFF3F7FF)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Box {
@@ -1128,6 +1313,27 @@ private fun GlobalSettingsDialog(
                                 onClick = {
                                     feedbackMode = mode
                                     modeMenuExpanded = false
+                                }
+                            )
+                        }
+                    }
+                }
+                Box {
+                    PickerButton(
+                        title = "手势映射",
+                        value = gestureMode.label,
+                        onClick = { gestureMenuExpanded = true }
+                    )
+                    DropdownMenu(
+                        expanded = gestureMenuExpanded,
+                        onDismissRequest = { gestureMenuExpanded = false }
+                    ) {
+                        TapGestureMode.entries.forEach { mode ->
+                            DropdownMenuItem(
+                                text = { Text(mode.label) },
+                                onClick = {
+                                    gestureMode = mode
+                                    gestureMenuExpanded = false
                                 }
                             )
                         }
@@ -1157,7 +1363,7 @@ private fun GlobalSettingsDialog(
             }
         },
         confirmButton = {
-            Button(onClick = { onApply(feedbackMode, keepScreenOn) }) {
+            Button(onClick = { onApply(feedbackMode, keepScreenOn, gestureMode) }) {
                 Text("应用")
             }
         },
@@ -1165,6 +1371,85 @@ private fun GlobalSettingsDialog(
             Button(onClick = onDismiss) {
                 Text("取消")
             }
+        }
+    )
+}
+
+@Composable
+private fun RestartStatsDialog(
+    groups: List<RestartStatsGroup>,
+    onDismiss: () -> Unit
+) {
+    val scrollState = rememberScrollState()
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("手动重开统计", color = Color(0xFFF3F7FF)) },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(scrollState),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                if (groups.isEmpty()) {
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = Color(0xFF102235)),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text(
+                            "暂无手动重开记录",
+                            color = Color(0xFFE3EEFF),
+                            modifier = Modifier.padding(10.dp)
+                        )
+                    }
+                } else {
+                    groups.forEach { group ->
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = Color(0xFF102235)),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(10.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Text(group.title, color = Color(0xFFF1F6FF), fontWeight = FontWeight.SemiBold)
+                                group.seconds.chunked(5).forEach { row ->
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        row.forEach { sec ->
+                                            Card(
+                                                shape = RoundedCornerShape(10.dp),
+                                                colors = CardDefaults.cardColors(containerColor = Color(0xFF1F3853)),
+                                                modifier = Modifier.weight(1f)
+                                            ) {
+                                                Text(
+                                                    text = "${sec}秒",
+                                                    color = Color(0xFFE5F0FF),
+                                                    textAlign = TextAlign.Center,
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .padding(vertical = 8.dp)
+                                                )
+                                            }
+                                        }
+                                        repeat(5 - row.size) {
+                                            Spacer(modifier = Modifier.weight(1f))
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(onClick = onDismiss) { Text("关闭") }
         }
     )
 }
