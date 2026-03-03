@@ -277,7 +277,7 @@ class CountdownViewModel(application: Application) : AndroidViewModel(applicatio
         val total = (minutes * 60L + seconds) * 1000L
         val id = idSeed++
         timers.add(
-            CountdownItem(
+            CountdownItem( 
                 id = id,
                 totalMillis = total,
                 remainingMillis = total,
