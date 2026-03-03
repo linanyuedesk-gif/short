@@ -17,9 +17,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -32,6 +30,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -39,7 +38,6 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -141,16 +139,16 @@ enum class ToneOption(
 }
 
 enum class FeedbackMode(val label: String) {
-    SoundOnly("Pure Sound"),
-    VibrationOnly("Pure Vibration"),
-    SoundAndVibration("Sound + Vibration")
+    SoundOnly("纯音效"),
+    VibrationOnly("纯振动"),
+    SoundAndVibration("音效和振动")
 }
 
 enum class TickAlertOption(val label: String) {
-    Off("Off"),
-    Last5Seconds("Last 5s"),
-    Last3Seconds("Last 3s"),
-    Custom("Custom")
+    Off("关闭"),
+    Last5Seconds("最后5秒"),
+    Last3Seconds("最后3秒"),
+    Custom("自定义")
 }
 
 data class GlobalSettings(
@@ -661,7 +659,6 @@ class CountdownViewModel(application: Application) : AndroidViewModel(applicatio
     }
 }
 
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun CountdownScreen(vm: CountdownViewModel) {
     var configTimerId by remember { mutableStateOf<Long?>(null) }
@@ -762,21 +759,27 @@ fun CountdownScreen(vm: CountdownViewModel) {
             }
         }
 
-        FloatingActionButton(
-            onClick = {},
-            containerColor = Color(0xFF1B3A57).copy(alpha = 0.45f),
-            contentColor = Color(0xFFEAF2FF).copy(alpha = 0.82f),
+        Box(
             modifier = Modifier
-                .combinedClickable(
-                    onClick = { vm.addTimer() },
-                    onLongClick = { showGlobalSettings = true }
-                )
                 .align(Alignment.BottomEnd)
-                .alpha(0.72f)
                 .padding(20.dp)
                 .size(48.dp)
+                .alpha(0.72f)
+                .background(Color(0xFF1B3A57).copy(alpha = 0.45f), CircleShape)
+                .pointerInput(Unit) {
+                    detectTapGestures(
+                        onTap = { vm.addTimer() },
+                        onLongPress = { showGlobalSettings = true }
+                    )
+                },
+            contentAlignment = Alignment.Center
         ) {
-            Text("+", fontSize = 22.sp, fontWeight = FontWeight.Medium)
+            Text(
+                text = "+",
+                color = Color(0xFFEAF2FF).copy(alpha = 0.82f),
+                fontSize = 22.sp,
+                fontWeight = FontWeight.Medium
+            )
         }
 
         val selected = vm.timers.firstOrNull { it.id == configTimerId }
