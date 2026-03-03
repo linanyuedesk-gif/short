@@ -30,8 +30,10 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -933,28 +935,51 @@ private fun TimerConfigDialog(
     var toneMenuExpanded by remember(timer.id) { mutableStateOf(false) }
     var styleMenuExpanded by remember(timer.id) { mutableStateOf(false) }
     var tickMenuExpanded by remember(timer.id) { mutableStateOf(false) }
+    val scrollState = rememberScrollState()
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Configure") },
+        title = { Text("倒计时设置") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                OutlinedTextField(
-                    value = minuteInput,
-                    onValueChange = { minuteInput = it.filter(Char::isDigit).take(3) },
-                    label = { Text("Min") },
-                    singleLine = true
-                )
-                OutlinedTextField(
-                    value = secondInput,
-                    onValueChange = { secondInput = it.filter(Char::isDigit).take(2) },
-                    label = { Text("Sec") },
-                    singleLine = true
-                )
-                Box {
-                    Button(onClick = { toneMenuExpanded = true }) {
-                        Text("Tone: ${selectedTone.label}")
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(scrollState),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Card(
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF102235))
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(10.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedTextField(
+                            value = minuteInput,
+                            onValueChange = { minuteInput = it.filter(Char::isDigit).take(3) },
+                            label = { Text("分钟") },
+                            singleLine = true,
+                            modifier = Modifier.weight(1f)
+                        )
+                        OutlinedTextField(
+                            value = secondInput,
+                            onValueChange = { secondInput = it.filter(Char::isDigit).take(2) },
+                            label = { Text("秒") },
+                            singleLine = true,
+                            modifier = Modifier.weight(1f)
+                        )
                     }
+                }
+
+                Box {
+                    PickerButton(
+                        title = "结束音效",
+                        value = selectedTone.label,
+                        onClick = { toneMenuExpanded = true }
+                    )
                     DropdownMenu(expanded = toneMenuExpanded, onDismissRequest = { toneMenuExpanded = false }) {
                         ToneOption.entries.forEach { tone ->
                             DropdownMenuItem(
@@ -967,10 +992,13 @@ private fun TimerConfigDialog(
                         }
                     }
                 }
+
                 Box {
-                    Button(onClick = { styleMenuExpanded = true }) {
-                        Text("Style: ${selectedStyle.label}")
-                    }
+                    PickerButton(
+                        title = "样式",
+                        value = selectedStyle.label,
+                        onClick = { styleMenuExpanded = true }
+                    )
                     DropdownMenu(expanded = styleMenuExpanded, onDismissRequest = { styleMenuExpanded = false }) {
                         TimerStyle.entries.forEach { style ->
                             DropdownMenuItem(
@@ -992,10 +1020,13 @@ private fun TimerConfigDialog(
                         }
                     }
                 }
+
                 Box {
-                    Button(onClick = { tickMenuExpanded = true }) {
-                        Text("Tick: ${selectedTickAlert.label}")
-                    }
+                    PickerButton(
+                        title = "最后滴答",
+                        value = selectedTickAlert.label,
+                        onClick = { tickMenuExpanded = true }
+                    )
                     DropdownMenu(expanded = tickMenuExpanded, onDismissRequest = { tickMenuExpanded = false }) {
                         TickAlertOption.entries.forEach { option ->
                             DropdownMenuItem(
@@ -1008,12 +1039,14 @@ private fun TimerConfigDialog(
                         }
                     }
                 }
+
                 if (selectedTickAlert == TickAlertOption.Custom) {
                     OutlinedTextField(
                         value = customTickSecondsInput,
                         onValueChange = { customTickSecondsInput = it.filter(Char::isDigit).take(2) },
-                        label = { Text("Custom Tick Seconds") },
-                        singleLine = true
+                        label = { Text("自定义秒数（1-30）") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
                     )
                 }
             }
@@ -1032,22 +1065,36 @@ private fun TimerConfigDialog(
                     )
                 }
             ) {
-                Text("Apply")
+                Text("应用")
             }
         },
         dismissButton = {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (canDelete) {
                     Button(onClick = onDelete) {
-                        Text("Delete")
+                        Text("删除")
                     }
                 }
                 Button(onClick = onDismiss) {
-                    Text("Cancel")
+                    Text("取消")
                 }
             }
         }
     )
+}
+
+@Composable
+private fun PickerButton(
+    title: String,
+    value: String,
+    onClick: () -> Unit
+) {
+    Button(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Text("$title: $value")
+    }
 }
 
 @Composable
@@ -1062,13 +1109,15 @@ private fun GlobalSettingsDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Global Settings") },
+        title = { Text("全局设置") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Box {
-                    Button(onClick = { modeMenuExpanded = true }) {
-                        Text("Feedback: ${feedbackMode.label}")
-                    }
+                    PickerButton(
+                        title = "提醒模式",
+                        value = feedbackMode.label,
+                        onClick = { modeMenuExpanded = true }
+                    )
                     DropdownMenu(
                         expanded = modeMenuExpanded,
                         onDismissRequest = { modeMenuExpanded = false }
@@ -1096,7 +1145,7 @@ private fun GlobalSettingsDialog(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = "Keep Screen On (Anti Burn-in)",
+                            text = "屏幕常亮（防烧屏）",
                             color = Color(0xFFE4F0FF)
                         )
                         Switch(
@@ -1109,12 +1158,12 @@ private fun GlobalSettingsDialog(
         },
         confirmButton = {
             Button(onClick = { onApply(feedbackMode, keepScreenOn) }) {
-                Text("Apply")
+                Text("应用")
             }
         },
         dismissButton = {
             Button(onClick = onDismiss) {
-                Text("Cancel")
+                Text("取消")
             }
         }
     )
