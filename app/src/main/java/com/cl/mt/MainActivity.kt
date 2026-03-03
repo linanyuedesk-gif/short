@@ -491,7 +491,7 @@ class CountdownViewModel(application: Application) : AndroidViewModel(applicatio
                         appendLine("  Groups:")
                         groups.forEach { group ->
                             appendLine("    * ${group.title}")
-                            appendLine("      ${group.seconds.joinToString(", ") { \"${it}s\" }}")
+                            appendLine("      ${group.seconds.joinToString(", ") { "${it}s" }}")
                         }
                     }
                     appendLine("--------------------------------")
